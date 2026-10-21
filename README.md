@@ -1,26 +1,65 @@
 # AI SDR Agent · 销售线索工作台
 
-把销售通话文本或录音转成**有原文依据、可解释评分、可人工复核的销售线索**。
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="AI SDR 工作台" width="86%">
+</p>
+
+<p align="center">
+  <strong>把销售通话变成有证据、有评分、可人工复核的 SQL 线索</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/dhc979917-ux/AI-SDR-Agent/actions/workflows/ci.yml"><img src="https://github.com/dhc979917-ux/AI-SDR-Agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/FastAPI-0.148-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" alt="SQLite">
+</p>
+
+<p align="center">
+  <a href="docs/运行过程.md">运行过程</a> ·
+  <a href="docs/在线Demo部署.md">在线 Demo</a> ·
+  <a href="docs/AI_SDR_Agent_设计文档.md">设计文档</a> ·
+  <a href="docs/AI_SDR_Agent_设计文档.pdf">PDF</a> ·
+  <a href="docs/录屏讲稿_最终版.md">录屏讲稿</a> ·
+  <a href="docs/真实数据评测.md">真实评测</a>
+</p>
 
 面向酷家乐 XDR 场景的 AI 应用开发笔试项目，支持录音转写、角色确认、客户档案、企业抬头识别与还原、意向评分、审核修正和导出。这里的 SQL 指 **Sales Qualified Lead（销售合格线索）**。
 
 **Python 3.11+ · FastAPI · SQLite · 原生 JavaScript · 无前端构建步骤**
 
-[![CI](https://github.com/dhc979917-ux/AI-SDR-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/dhc979917-ux/AI-SDR-Agent/actions/workflows/ci.yml)
-
-[在线 Demo 部署](docs/在线Demo部署.md) · [运行过程](docs/运行过程.md) · [设计文档](docs/AI_SDR_Agent_设计文档.md) / [PDF](docs/AI_SDR_Agent_设计文档.pdf) / [Word](docs/AI_SDR_Agent_设计文档.docx) · [录屏讲稿 Markdown](docs/录屏讲稿_最终版.md) / [PDF](docs/录屏讲稿_最终版.pdf) / [Word](docs/录屏讲稿_最终版.docx)
-
 本项目为单团队、单进程的本地演示应用。品牌素材的来源和使用说明见 [品牌与业务呈现](docs/品牌与业务呈现.md)。
+
+---
+
+## 界面预览
+
+| 审核队列与优先级 | 企业抬头与审核 |
+|:---:|:---:|
+| <img src="docs/screenshots/review-priority.png" alt="审核队列与优先级" width="100%"> | <img src="docs/screenshots/assignment-review.png" alt="企业抬头与审核" width="100%"> |
+| 异常优先、待复核、批量处理 | 企查查召回、AI 重排、人工确认 |
+| **审核结果** | **审核审计** |
+| <img src="docs/screenshots/review-result.png" alt="审核结果" width="100%"> | <img src="docs/screenshots/review-audit.png" alt="审核审计" width="100%"> |
+| 原文证据、字段修正、异常定性 | 原始结果、人工修订、审计差异 |
+| **录音与自动分析** | **客户与资源调配** |
+| <img src="docs/screenshots/audio-transcription.png" alt="录音与自动分析" width="100%"> | <img src="docs/screenshots/customer-allocation.png" alt="客户与资源调配" width="100%"> |
+| ASR、AI 分角色、自动提交 | 客户归属、管理员调配、权限隔离 |
+
+截图为演示数据；最新界面以在线 Demo 为准。完整操作步骤见 [运行过程](docs/运行过程.md)。
+
+---
 
 ## 在线 Demo
 
-> 部署后把 Render 地址填在这里：`https://<your-service>.onrender.com`
+> 部署后把公网地址填在这里：`https://<your-service>.onrender.com`
 >
 > 演示账号：`admin`；密码由部署环境变量 `SDR_DEMO_ADMIN_PASSWORD` 设置。
 
 免费 Render 实例会休眠，首次打开需要几十秒冷启动；数据不持久，启动时会重新生成合成演示数据。需要常驻和持久化时使用 `render.paid.yaml` 或自己的服务器。
 
 无域名、无国外卡的稳定方案：香港轻量服务器 + `docker-compose.vps.yml` + Caddy + 免费 `sslip.io`，步骤见 [在线 Demo 部署](docs/在线Demo部署.md)。
+
+---
 
 ## 运行说明
 
@@ -48,16 +87,7 @@ node --test tests/test_audio_confirmation.cjs
 - 企查查通过 `QCC_MCP_URL` / `QCC_MCP_TOKEN` 或本机 `var/qcc-mcp.json` 配置；未配置时保留客户原话。
 - 详细配置、公网部署和截图演示见 [运行过程](docs/运行过程.md) 与 [在线 Demo 部署](docs/在线Demo部署.md)。
 
-## 运行过程速览
-
-| 步骤 | 看什么 | 截图 |
-|---|---|---|
-| 1. 分析题目样例 | 意向 75 分、四维证据、企业抬头候选 | [工作台](docs/screenshots/workspace.png) |
-| 2. 企业抬头 | 企查查候选、AI 重排、exact 自动确认/品牌人工确认 | [企业抬头与审核](docs/screenshots/assignment-review.png) |
-| 3. 人工审核 | 原文证据预填、字段修正、独立复核、审计 | [审核审计](docs/screenshots/review-audit.png) |
-| 4. 录音/批量 | 自动分角色、自动分析、待确认数量、批量 TXT | [录音转写](docs/screenshots/audio-transcription.png) |
-
-截图为演示数据；最新界面以在线 Demo 为准。完整操作步骤、每步预期结果和 GitHub 展示建议见 [运行过程](docs/运行过程.md)。
+---
 
 ## 项目解决什么问题
 
@@ -72,19 +102,11 @@ node --test tests/test_audio_confirmation.cjs
 
 完整方案见 [设计书 Markdown](docs/AI_SDR_Agent_设计文档.md) / [设计书 PDF](docs/AI_SDR_Agent_设计文档.pdf) / [Word](docs/AI_SDR_Agent_设计文档.docx)；更细的历史版本见 [详细版](docs/AI_SDR_Agent_设计文档_改进版.md)。代码对应关系见 [实现与设计对应](docs/实现与设计对应.md)。
 
-## 快速开始
+## 详细配置
 
-需要 Python 3.11 或更新版本，建议使用 3.12。克隆仓库后执行：
+### 手动安装
 
-```bash
-git clone https://github.com/dhc979917-ux/AI-SDR-Agent.git
-cd AI-SDR-Agent
-./run.sh
-```
-
-打开 **http://127.0.0.1:8765**。首次运行创建虚拟环境并安装依赖，需要网络。账号库为空时生成随机密码的 `admin`，凭据保存在本机 `var/初始管理员账号.txt`。登录后可创建员工、建立客户档案并分配负责人。
-
-也可手动运行；Windows 将 Python 路径换成 `.venv\Scripts\python.exe`：
+需要 Python 3.11 或更新版本，建议使用 3.12。Windows 将 Python 路径换成 `.venv\Scripts\python.exe`：
 
 ```bash
 python3 -m venv .venv
@@ -253,6 +275,8 @@ node --check static/audio-roles.js
 ```
 
 2026-10-20 本轮检查：**229 项 Python 测试、7 项前端角色确认测试、12/12 个合成规则回归场景通过**，上述 JavaScript 语法检查通过。真实企查查冒烟集 7 条：6 条有预期主体，Top-1、Top-3 与候选召回均为 6/6；这是小型冒烟集，不是冻结盲测或业务准确率。Python 测试有一条第三方 Starlette/httpx 弃用提示，不影响本轮通过。新增测试覆盖 QCC MCP 解析、SSE、鉴权失败、畸形响应、缓存、候选标注、文字模型重排、精确全称自动确认、品牌不自动确认、重排失败回退、检索失败回退、“多候选不自动选择”和“选择后独立复核”；批量测试覆盖 TXT 自动分角色、录音自动分析、自动建档、兜底路径和证据预填。
+
+真实/半真实评测流程见 [真实数据评测](docs/真实数据评测.md)，标注模板为 `eval/labeled_cases.example.json`。
 
 默认测试使用本地、模拟或合成数据。真实 QCC 冒烟通过单独脚本执行，不进入普通回归。本轮未调用真实客户录音做模型测试，也未重新进行完整浏览器端到端验收。合成回归通过率不代表真实业务准确率；历史模型报告保留各自时间和验证范围。见 [验收记录](docs/验收记录.md)。
 
