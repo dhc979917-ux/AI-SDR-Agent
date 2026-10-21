@@ -11,7 +11,7 @@ class Model(BaseModel):
 
 class Turn(Model):
     id: str
-    speaker: Literal["customer", "sales", "other", "excluded", "unknown"]
+    speaker: Literal["customer", "sales", "other", "excluded", "unknown", "pending"]
     text: str
 
 

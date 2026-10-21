@@ -31,7 +31,11 @@ def revise(record, request: ReviewRequest, actor, settings):
     if record["request"]["data_mode"] == "real" and request.source_reference.startswith("demo://"):
         raise ReviewError("真实线索不能使用演示证据。")
     changed = bool(request.fields or request.signal_kinds or request.entity_id or request.call_type or request.intent_level)
-    if changed and not (customer_text or external):
+    qcc_entity = bool(request.entity_id) and any(
+        candidate.get("source_type") == "qcc_mcp" and candidate.get("id") == request.entity_id
+        for candidate in result["entity"].get("candidates", []))
+    qcc_entity_only = qcc_entity and not request.fields and not request.signal_kinds and not request.call_type and not request.intent_level
+    if changed and not (customer_text or external or qcc_entity_only):
         raise ReviewError("修正必须附客户原文轮次或可追溯的外部来源。")
     for name, value in request.fields.items():
         if name not in result["extraction"]["fields"]:
@@ -73,13 +77,16 @@ def revise(record, request: ReviewRequest, actor, settings):
             raise ReviewError("请选择当前检索结果中的主体；没有正确候选时应暂缓并补企业资料。")
         if not source_valid(entity, record["request"]["data_mode"]):
             raise ReviewError("该主体来源未核验、已过期或属于不匹配的数据模式。")
-        if len(request.relation_note.strip()) < 5 or not (external or entity.get("relation_supported")):
+        qcc_attested = entity.get("source_type") == "qcc_mcp"
+        if not qcc_attested and (len(request.relation_note.strip()) < 5 or not (external or entity.get("relation_supported"))):
             raise ReviewError("确认主体需要说明客户归属，并提供关联证据来源。")
         selected_before = (result["entity"].get("selected") or {}).get("id")
-        high_impact |= selected_before != request.entity_id
-        result["entity"].update(status="verified", selected={**entity, "relation_supported": True,
+        high_impact |= result["entity"].get("status") == "suggested" or selected_before != request.entity_id
+        result["entity"].update(status="confirmed", selected={**entity, "relation_supported": True,
                                 "relation_note": request.relation_note, "source_reference": request.source_reference,
-                                "verification_method": "human_attestation"}, quality=1.0, missing=[])
+                                "verification_method": "human_confirmed_qcc" if qcc_attested else "human_attestation",
+                                "confirmed_by": actor, "confirmed_at": now()},
+                                quality=1.0, missing=[])
     if "raw_company" in request.fields and not request.entity_id:
         # A changed name invalidates the old entity relation; never keep an unrelated verified title.
         result["entity"].update(status="unresolved", selected=None, quality=.25, mention=request.fields["raw_company"])

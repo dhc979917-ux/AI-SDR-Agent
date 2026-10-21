@@ -75,11 +75,20 @@ function audioSegmentsPanel(a){
   const completed=a.segments.filter(s=>s.status==='completed').length;
   return `<section class="card audio-segments"><div class="card-head"><div><h2>分段转写进度</h2><p>已完成 ${completed}/${a.segments.length} 段 · 按录音顺序合并</p></div>${pill(completed===a.segments.length?'片段已完成':'保留已完成结果',completed===a.segments.length?'green':'blue')}</div><div class="card-body"><progress aria-label="录音分段完成进度" max="${a.segments.length}" value="${completed}"></progress><p class="small-note">${a.status==='failed'||a.status==='interrupted'?'已保存的成功片段将在重试时复用。':''}点击片段可查看文字并回放对应位置；最终以完整校对稿为准。</p><div class="audio-segment-list">${a.segments.map(s=>`<details><summary><span>第 ${s.index} 段 · ${audioTime(s.start)} — ${audioTime(s.end)}</span>${pill(s.status==='completed'?'已完成':'待处理',s.status==='completed'?'green':'gray')}</summary><p class="raw-transcript">${esc(s.status==='completed'?(s.text||'此段为数字静音，无转写文字。'):'此片段尚未完成转写。')}</p><button class="text-button" data-team="seek-audio" data-start="${s.start}">从 ${audioTime(s.start)} 回放</button></details>`).join('')}</div></div></section>`;
 }
+function audioPendingCount(a){return (a?.confirmed_text||'').split('\n').filter(line=>/^\s*待确认\s*[:：]/.test(line)).length;}
 function audioBusy(a){return ['queued','running'].includes(a.status)||['queued','running'].includes(a.identity_status)||['queued','running'].includes(a.role_status);}
 function audioBadge(a){
   if(['queued','running','failed','interrupted'].includes(a.status))return pill(audioLabels[a.status],audioColors[a.status]);
   if(['queued','running'].includes(a.role_status))return pill('正在分角色','blue');
   if(['queued','running'].includes(a.identity_status))return pill('识别客户中','blue');
+  if(a.auto_analyze){
+    if(a.auto_analysis_status==='queued'||a.auto_analysis_status==='running')return pill('自动分析中','blue');
+    if(a.auto_analysis_status==='manual_ready')return pill('已手动确认 · 可重分析','blue');
+    if(a.auto_analysis_status==='submitted'){const pending=audioPendingCount(a);return pending?pill(`已自动分析 · ${pending}处待确认`,'amber'):pill('已提交分析','green');}
+    if(a.auto_analysis_status==='failed')return pill('自动分析失败','red');
+    if(a.auto_analysis_status==='interrupted')return pill('自动分析中断','amber');
+  }
+  if(a.status==='confirmed'&&audioPendingCount(a))return pill(`${audioPendingCount(a)}处角色待确认`,'amber');
   if(!a.customer_id)return pill('待确认客户','purple');
   return pill(audioLabels[a.status],audioColors[a.status]);
 }
@@ -97,8 +106,8 @@ async function audioView(){
     <div id="audio-existing-fields" class="field"><div class="label-row"><label class="field-label" for="audio-customer">归属客户</label><button class="text-button" data-team="new-customer">新建客户 +</button></div><input id="audio-customer-search" type="search" aria-label="搜索已有客户" placeholder="搜索客户名称、联系人或电话"><select id="audio-customer">${customerOptions(S.audioCustomerFilter||'')}</select></div>
     <div id="audio-ai-note" class="notice info" hidden>无需预先建档。AI 根据录音中的公司、联系人、电话提供建议；信息不足时可以手动选择或新建客户。</div>
     <div class="field"><label class="field-label" for="audio-data-mode">数据类型</label><select id="audio-data-mode"><option value="real">真实业务录音</option><option value="synthetic">合成演示录音</option><option value="snapshot_demo">题目 / 脱敏录音</option></select></div>
-    <label class="audio-drop" for="audio-file">${icon('audio')}<strong>选择通话录音</strong><span>WAV · MP3 · M4A · FLAC · OGG</span><span>单个文件 ≤${S.config.audio_max_bytes/1024/1024} MB，时长 ≤${S.config.audio_max_seconds/60}分钟</span><input id="audio-file" type="file" accept=".wav,.mp3,.m4a,.flac,.ogg" aria-label="选择通话录音"></label>
-    <p class="small-note">转写后自动整理销售／客户逐轮对话；长录音分段合并，中断后可继续。</p><p id="audio-file-name" class="small-note">尚未选择文件</p><label class="consent-line"><input id="audio-consent" type="checkbox" class="checkbox"><span id="audio-consent-copy">将录音提交到已配置的语音服务转写，并将转写内容提交到文字分析模型划分销售和客户角色。</span></label><div id="audio-upload-error" class="form-error" hidden role="alert"></div><button class="btn primary audio-submit" data-team="upload-audio" ${!S.config.asr_available?'disabled':''}>${icon('upload')} 上传并转写</button>
+    <label class="audio-drop" for="audio-file">${icon('audio')}<strong>选择通话录音</strong><span>WAV · MP3 · M4A · FLAC · OGG</span><span>单个文件 ≤${S.config.audio_max_bytes/1024/1024} MB，时长 ≤${S.config.audio_max_seconds/60}分钟</span><input id="audio-file" type="file" accept=".wav,.mp3,.m4a,.flac,.ogg" multiple aria-label="选择通话录音"></label>
+    <p class="small-note">转写后自动整理销售／客户逐轮对话；长录音分段合并，中断后可继续。批量上传：选择已有客户时归入该客户，否则按文件名自动建档；电话、联系人留空，人工审核时再补。</p><p id="audio-file-name" class="small-note">尚未选择文件</p><label class="consent-line"><input id="audio-consent" type="checkbox" class="checkbox"><span id="audio-consent-copy">将录音提交到已配置的语音服务转写，并将转写内容提交到文字分析模型划分销售和客户角色。</span></label><label class="consent-line"><input id="audio-auto-analyze" type="checkbox" class="checkbox" checked><span>上传后自动确认角色并提交分析（使用所选客户；电话、联系人可后补）</span></label><div id="audio-upload-error" class="form-error" hidden role="alert"></div><div class="audio-submit-row"><button class="btn primary audio-submit" data-team="upload-audio" ${!S.config.asr_available?'disabled':''}>${icon('upload')} 上传并转写</button><button class="btn secondary audio-submit" data-team="batch-upload-audio" ${!S.config.asr_available?'disabled':''}>${icon('upload')} 批量上传并自动分析</button></div>
   </div></section><section class="card"><div class="card-head"><div><h2>录音档案</h2><p>原始录音、机器转写与人工校对稿分别保存</p></div><button class="text-button" data-team="refresh-audio">刷新</button></div>${S.audioCustomerFilter?`<div class="audio-filter">${esc(customerName(S.audioCustomerFilter))}<button class="text-button" data-team="clear-audio-filter">显示全部</button></div>`:''}${rows.length?`<div class="audio-list">${audioItems(rows)}</div>`:empty('还没有录音','选择客户识别方式，上传第一段通话录音。')}</section></div>`;
   scheduleAudioListPoll();
 }
@@ -109,7 +118,7 @@ function scheduleAudioListPoll(){
     scheduleAudioListPoll();
   }catch(e){toast(e.message,true);}},1800);
 }
-async function openAudio(tid){const draft=S.audioCurrent?.id===tid&&S.audioDraftDirty?S.audioDraft:null;clearTimeout(S.audioPoll);clearTimeout(S.poll);if(S.view==='workspace')saveDraft();await loadOverview();S.audioCurrent=await api(`/api/transcriptions/${tid}`);S.audioDraft=draft??audioDraftFor(S.audioCurrent);S.audioDraftDirty=draft!==null;S.view='audioDetail';updateChrome();renderAudioDetail();window.scrollTo({top:0});pollAudio(tid);}
+async function openAudio(tid){const draft=S.audioCurrent?.id===tid&&S.audioDraftDirty?S.audioDraft:null;clearTimeout(S.audioPoll);clearTimeout(S.poll);if(S.view==='workspace')saveDraft();await loadOverview();S.audioCurrent=await api(`/api/transcriptions/${tid}`);if(!draft&&S.audioCurrent.customer_id&&S.audioCurrent.role_status==='ready'&&['transcribed','confirmed'].includes(S.audioCurrent.status)&&!S.audioCurrent.auto_analysis_id&&!audioPendingCount(S.audioCurrent)&&!['failed','interrupted'].includes(S.audioCurrent.auto_analysis_status)){try{S.audioCurrent=await api(`/api/transcriptions/${tid}/auto-analyze`,{method:'POST'});}catch(e){}}S.audioDraft=draft??audioDraftFor(S.audioCurrent);S.audioDraftDirty=draft!==null;S.view='audioDetail';updateChrome();renderAudioDetail();window.scrollTo({top:0});pollAudio(tid);}
 function pollAudio(tid){
   clearTimeout(S.audioPoll);if(!audioBusy(S.audioCurrent))return;
   S.audioPoll=setTimeout(async()=>{try{
@@ -136,14 +145,32 @@ function audioIdentityPanel(a){
   </div></section>`;
 }
 function renderAudioDetail(){
-  const a=S.audioCurrent;if(!a)return;const busy=audioBusy(a),transcribing=['queued','running'].includes(a.status),editable=['transcribed','confirmed'].includes(a.status);
+  const a=S.audioCurrent;if(!a)return;const busy=audioBusy(a),transcribing=['queued','running'].includes(a.status),editable=['transcribed','confirmed'].includes(a.status),pending=audioPendingCount(a);
   main.innerHTML=`<button class="back" data-nav="audio">${icon('back')} 返回录音档案</button>`+heading(a.filename,`${a.customer_id?customerName(a.customer_id):'客户身份待确认'} · ${audioTime(a.duration)} · ${(a.size/1024/1024).toFixed(2)} MB`,'TRANSCRIPT REVIEW',audioBadge(a))+`
   <section class="card audio-player"><div><strong>原始通话录音</strong><p class="small-note">边听边核对，尤其注意姓名、企业名称和数字。</p></div><audio controls preload="metadata" src="/api/transcriptions/${a.id}/audio"></audio></section>
-  ${a.error?`<div class="notice error audio-notice">${esc(a.error)}</div>`:''}${transcribing?`<div class="card audio-progress"><span class="spinner"></span><h2>${a.status==='queued'?'录音已保存，正在等待处理':a.provider.stage==='preparing'?'正在预处理录音':a.provider.segment_count?`正在转写第 ${a.provider.current_segment||1}/${a.provider.segment_count} 段`:'正在识别通话内容'}</h2><p class="small-note">${a.customer_mode==='ai'?'转写完成后会继续识别客户身份。':''}可以离开此页，任务会在后台继续处理。</p></div>`:''}
+  ${a.error?`<div class="notice error audio-notice">${esc(a.error)}</div>`:''}${a.auto_analyze?`<div class="notice ${a.auto_analysis_status==='failed'||a.auto_analysis_status==='interrupted'?'error':pending?'':'info'}">${a.auto_analysis_status==='failed'||a.auto_analysis_status==='interrupted'?`自动分析未完成：${esc(a.auto_analysis_error||'')}<button class="text-button" data-team="retry-auto-analysis">重试自动分析 →</button>`:a.auto_analysis_status==='manual_ready'?'已手动确认校对稿，可点击「直接分析这段录音」重新分析。':pending?`已自动提交分析；${pending} 处角色待确认已标记为不参与事实抽取，修正并保存后可直接分析修正稿。${a.auto_analysis_id?`<button class="text-button" data-action="detail" data-id="${esc(a.auto_analysis_id)}">查看分析结果 →</button>`:''}`:a.auto_analysis_id?`已自动提交分析。<button class="text-button" data-action="detail" data-id="${esc(a.auto_analysis_id)}">查看分析结果 →</button>`:'自动分析排队中…'}${a.auto_role_fallback?' 角色识别未完成，已自动兜底为客户发言，请人工核对。':''}</div>`:''}${transcribing?`<div class="card audio-progress"><span class="spinner"></span><h2>${a.status==='queued'?'录音已保存，正在等待处理':a.provider.stage==='preparing'?'正在预处理录音':a.provider.segment_count?`正在转写第 ${a.provider.current_segment||1}/${a.provider.segment_count} 段`:'正在识别通话内容'}</h2><p class="small-note">${a.customer_mode==='ai'?'转写完成后会继续识别客户身份。':''}可以离开此页，任务会在后台继续处理。</p></div>`:''}
   ${audioSegmentsPanel(a)}${audioIdentityPanel(a)}${audioRolesPanel(a)}
-  ${editable?`<div class="audio-review-grid"><section class="card"><div class="card-head"><h2>机器原始转写</h2>${pill('原文保留','gray')}</div><div class="card-body"><p class="raw-transcript">${esc(a.raw_text)}</p><p class="small-note">语音识别服务：${esc(a.provider.model||S.config.asr_model)}。销售／客户的发言角色仍需按录音逐段核对。</p></div></section><section class="card"><div class="card-head"><h2>角色与文字校对</h2>${pill(`修订 v${a.revision}`,'blue')}</div><div class="card-body"><div class="notice info">请先在上方「逐条确认角色」处理待确认语句，再核对这里的完整对话。系统播报可标为「其他：」，无法判断归属可标为「存疑：」并排除分析；确认客户并保存后即可分析。</div><label class="field-label" for="audio-transcript" style="margin-top:18px">校对后的通话转写</label><textarea id="audio-transcript" class="transcript-input" maxlength="${S.config.transcript_max_chars||100000}" ${busy?'disabled':''} placeholder="销售：您好，请问您有哪些需求？&#10;客户：……">${esc(S.audioDraft)}</textarea><div id="audio-confirm-error" class="form-error" hidden role="alert"></div><div id="audio-next-step" class="notice info" role="status"></div><div class="audio-review-actions"><button class="btn secondary" data-team="confirm-audio" ${busy?'disabled':''}>保存校对并确认角色</button><button class="btn primary" data-team="analyze-audio" ${busy||!a.customer_id||a.status!=='confirmed'||S.audioDraft.trim()!==a.confirmed_text?'disabled':''}>进入通话分析 ${icon('arrow')}</button></div></div></section></div>`:''}
+  ${editable?`<div class="audio-review-grid"><section class="card"><div class="card-head"><h2>机器原始转写</h2>${pill('原文保留','gray')}</div><div class="card-body"><p class="raw-transcript">${esc(a.raw_text)}</p><p class="small-note">语音识别服务：${esc(a.provider.model||S.config.asr_model)}。销售／客户的发言角色仍需按录音逐段核对。</p></div></section><section class="card"><div class="card-head"><h2>角色与文字校对</h2>${pill(`修订 v${a.revision}`,'blue')}</div><div class="card-body"><div class="notice info">请先在上方「逐条确认角色」处理待确认语句，再核对这里的完整对话。系统播报可标为「其他：」，无法判断归属可标为「存疑：」并排除分析；确认客户并保存后即可分析。</div><label class="field-label" for="audio-transcript" style="margin-top:18px">校对后的通话转写</label><textarea id="audio-transcript" class="transcript-input" maxlength="${S.config.transcript_max_chars||100000}" ${busy?'disabled':''} placeholder="销售：您好，请问您有哪些需求？&#10;客户：……">${esc(S.audioDraft)}</textarea><div id="audio-confirm-error" class="form-error" hidden role="alert"></div><div id="audio-next-step" class="notice info" role="status"></div><div class="audio-review-actions"><button class="btn secondary" data-team="confirm-audio" ${busy?'disabled':''}>保存校对并确认角色</button>${a.auto_analysis_id&&a.auto_analysis_status==='submitted'?`<button class="btn primary" data-action="detail" data-id="${esc(a.auto_analysis_id)}">查看自动分析结果 ${icon('arrow')}</button>`:`<button class="btn primary" data-team="analyze-audio" ${busy||!a.customer_id||a.status!=='confirmed'||S.audioDraft.trim()!==a.confirmed_text?'disabled':''}>直接分析这段录音 ${icon('arrow')}</button>`}</div></div></section></div>`:''}
   <div class="audio-bottom-actions"><button class="text-button" data-team="refresh-audio-detail">刷新状态</button>${['failed','interrupted'].includes(a.status)?`<button class="btn primary" data-team="retry-audio">${a.provider.segmented?'继续未完成片段':'重新提交转写'}</button>`:''}${!busy?'<button class="text-button" data-team="delete-audio">删除未使用的录音</button>':''}</div>`;
   if(editable)updateAudioReviewControls();
+}
+
+async function batchUploadAudio(el,filesArg){
+  const files=filesArg||[...($('#audio-file').files||[])];
+  if(!files.length)throw new Error('请选择要批量上传的录音文件。');
+  if(!$('#audio-consent').checked)throw new Error('请确认将录音提交给语音服务转写。');
+  const dataMode=$('#audio-data-mode').value,mode=$('[name="audio-customer-mode"]:checked')?.value||'existing',cid=mode==='existing'?$('#audio-customer').value:'';let ok=0;const failed=[];
+  for(let i=0;i<files.length;i++){
+    const file=files[i];el.textContent=`正在上传 ${i+1}/${files.length}…`;
+    if(file.size>S.config.audio_max_bytes){failed.push(`${file.name}：超过大小限制`);continue;}
+    const params=new URLSearchParams({customer_mode:cid?'existing':'auto',...(cid?{customer_id:cid}:{}),auto_analyze:'true',filename:file.name,data_mode:dataMode,idempotency_key:crypto.randomUUID()});
+    for(let attempt=0;attempt<5;attempt++){
+      try{await api('/api/transcriptions?'+params,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});ok++;break;}
+      catch(e){if(attempt===4||!/(较多|稍后|429)/.test(e.message)){failed.push(`${file.name}：${e.message}`);break;}await new Promise(resolve=>setTimeout(resolve,2500));}
+    }
+  }
+  await loadOverview();await audioView();
+  toast(`批量任务：已提交 ${ok} 个${failed.length?`，${failed.length} 个失败：${failed.slice(0,2).join('；')}`:''}。`,failed.length>0);
 }
 
 async function teamAction(el){
@@ -175,14 +202,18 @@ async function teamAction(el){
   else if(action==='reset-user'||action==='toggle-user')updateUserDialog(el.dataset.id,action==='reset-user');
   else if(action==='update-user'){const reset=el.dataset.reset==='true';await api(`/api/admin/users/${S.userTarget.id}`,{method:'PATCH',body:JSON.stringify({reason:$('#user-reason').value.trim(),...(reset?{password:$('#reset-password').value}:{active:!S.userTarget.active})})});closeModal();if(S.userTarget.id===S.user.id){renderLogin();toast('密码已重置，请重新登录。');}else{await usersView();toast('账号状态已更新。');}}
   else if(action==='upload-audio'){
-    const file=$('#audio-file').files[0],mode=$('[name="audio-customer-mode"]:checked').value,cid=mode==='existing'?$('#audio-customer').value:'';
+    const files=[...($('#audio-file').files||[])],file=files[0],mode=$('[name="audio-customer-mode"]:checked').value,cid=mode==='existing'?$('#audio-customer').value:'';
+    if(files.length>1){await batchUploadAudio(el,files);return;}
     if(!file||mode==='existing'&&!cid)throw new Error('请选择录音文件；选择已有客户方式还需指定客户。');
     if(!$('#audio-consent').checked)throw new Error('请确认将录音提交给语音服务转写。');
     if(file.size>S.config.audio_max_bytes)throw new Error(`录音不能超过${S.config.audio_max_bytes/1024/1024} MB。`);
     el.textContent='正在上传…';
-    const params=new URLSearchParams({customer_mode:mode,...(cid?{customer_id:cid}:{}),filename:file.name,data_mode:$('#audio-data-mode').value,idempotency_key:crypto.randomUUID()});
+    const autoAnalyze=$('#audio-auto-analyze')?.checked;if(autoAnalyze&&mode!=='existing')throw new Error('自动分析请选择已有客户，或使用批量上传。');
+    const params=new URLSearchParams({customer_mode:mode,...(cid?{customer_id:cid}:{}),...(autoAnalyze?{auto_analyze:'true'}:{}),filename:file.name,data_mode:$('#audio-data-mode').value,idempotency_key:crypto.randomUUID()});
     const a=await api('/api/transcriptions?'+params,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});await loadOverview();await openAudio(a.id);toast('录音已保存，转写任务已提交。');
   }
+  else if(action==='batch-upload-audio')await batchUploadAudio(el);
+  else if(action==='retry-auto-analysis'){await api(`/api/transcriptions/${S.audioCurrent.id}/auto-analyze`,{method:'POST'});await openAudio(S.audioCurrent.id);toast('已重新提交自动分析。');}
   else if(action==='refresh-audio-detail')await openAudio(S.audioCurrent.id);
   else if(action==='pick-audio-customer'){
     $('[name="audio-link-mode"][value="existing"]').checked=true;$('#audio-link-existing').hidden=false;$('#audio-link-new').hidden=true;
@@ -206,8 +237,8 @@ async function teamAction(el){
   else if(action==='refresh-audio')await audioView();
   else if(action==='clear-audio-filter'){S.audioCustomerFilter=null;await audioView();}
   else if(action==='open-audio'){closeModal();await openAudio(el.dataset.id);}
-  else if(action==='confirm-audio'){S.audioDraft=$('#audio-transcript').value;S.audioCurrent=await api(`/api/transcriptions/${S.audioCurrent.id}/confirm`,{method:'POST',body:JSON.stringify({expected_revision:S.audioCurrent.revision,transcript:S.audioDraft})});S.audioDraft=S.audioCurrent.confirmed_text;S.audioDraftDirty=false;renderAudioDetail();toast('校对稿已保存，可继续分析。');}
-  else if(action==='analyze-audio'){const a=S.audioCurrent;if(!a.customer_id||a.status!=='confirmed'||S.audioDraft.trim()!==a.confirmed_text)throw new Error('请先保存当前校对稿。');S.draft={title:a.filename,transcript:a.confirmed_text,customer_id:a.customer_id,transcription_id:a.id,data_mode:a.data_mode,mode:S.config.llm_available?'llm':'rules',call_time:''};S.sampleId='';await navigate('workspace');}
+  else if(action==='confirm-audio'){S.audioDraft=$('#audio-transcript').value;S.audioCurrent=await api(`/api/transcriptions/${S.audioCurrent.id}/confirm`,{method:'POST',body:JSON.stringify({expected_revision:S.audioCurrent.revision,transcript:S.audioDraft})});S.audioDraft=S.audioCurrent.confirmed_text;S.audioDraftDirty=false;renderAudioDetail();toast(S.audioCurrent.auto_analysis_id?'校对稿已保存，已自动提交分析。':'校对稿已保存，可继续分析。');}
+  else if(action==='analyze-audio'){const a=S.audioCurrent;if(!a.customer_id||a.status!=='confirmed'||S.audioDraft.trim()!==a.confirmed_text)throw new Error('请先保存当前校对稿。');const created=await api('/api/analyses',{method:'POST',body:JSON.stringify({transcript:a.confirmed_text,title:a.filename,mode:S.config.llm_available?'llm':'rules',data_mode:a.data_mode,call_time:null,idempotency_key:crypto.randomUUID(),customer_id:a.customer_id,transcription_id:a.id})});await loadOverview();await openDetail(created.id);toast('已提交分析。');}
   else if(action==='seek-audio'){const player=$('.audio-player audio');player.currentTime=Number(el.dataset.start);await player.play();}
   else if(action==='retry-audio'){await api(`/api/transcriptions/${S.audioCurrent.id}/retry`,{method:'POST'});await openAudio(S.audioCurrent.id);}
   else if(action==='delete-audio'){showModal(`<div class="modal-head"><h2>删除这份录音？</h2></div><div class="modal-body"><p>${esc(S.audioCurrent.filename)}</p><p class="small-note">将删除本机录音和转写稿。已关联通话分析的录音会被保留。</p></div><div class="modal-actions"><button class="btn secondary" data-action="close-modal">取消</button><button class="btn danger" data-team="confirm-delete-audio">确认删除</button></div>`);}
@@ -215,11 +246,11 @@ async function teamAction(el){
 }
 
 document.addEventListener('submit',e=>{if(e.target.id==='login-form'){e.preventDefault();loginSubmit();}});
-document.addEventListener('click',async e=>{const el=e.target.closest('[data-team]');if(!el||el.disabled)return;el.disabled=true;try{await teamAction(el);}catch(err){const target=el.dataset.team==='confirm-audio'?$('#audio-confirm-error'):el.dataset.team==='upload-audio'?$('#audio-upload-error'):null;if(['link-audio-customer','identify-audio'].includes(el.dataset.team)){const box=$('#audio-identity-error');if(box){box.textContent=err.message;box.hidden=false;}else toast(err.message,true);}else if(target){target.textContent=err.message;target.hidden=false;}else toast(err.message,true);}finally{if(el.isConnected){el.disabled=false;if(el.dataset.team==='upload-audio')el.innerHTML=icon('upload')+' 上传并转写';}}});
+document.addEventListener('click',async e=>{const el=e.target.closest('[data-team]');if(!el||el.disabled)return;el.disabled=true;try{await teamAction(el);}catch(err){const target=el.dataset.team==='confirm-audio'?$('#audio-confirm-error'):['upload-audio','batch-upload-audio'].includes(el.dataset.team)?$('#audio-upload-error'):null;if(['link-audio-customer','identify-audio'].includes(el.dataset.team)){const box=$('#audio-identity-error');if(box){box.textContent=err.message;box.hidden=false;}else toast(err.message,true);}else if(target){target.textContent=err.message;target.hidden=false;}else toast(err.message,true);}finally{if(el.isConnected){el.disabled=false;if(el.dataset.team==='upload-audio')el.innerHTML=icon('upload')+' 上传并转写';if(el.dataset.team==='batch-upload-audio')el.innerHTML=icon('upload')+' 批量上传并自动分析';}}});
 document.addEventListener('change',e=>{
   if(e.target.name==='audio-customer-mode'){
     const ai=e.target.value==='ai';$('#audio-existing-fields').hidden=ai;$('#audio-customer').disabled=ai;$('#audio-ai-note').hidden=!ai;
-    $('#audio-consent').checked=false;$('#audio-consent-copy').textContent=ai?'将录音提交到已配置的语音服务转写，并将转写内容提交到文字分析模型划分角色和识别客户身份。':'将录音提交到已配置的语音服务转写，并将转写内容提交到文字分析模型划分销售和客户角色。';
+    $('#audio-consent').checked=false;const auto=$('#audio-auto-analyze');if(auto){auto.disabled=ai;if(ai)auto.checked=false;}$('#audio-consent-copy').textContent=ai?'将录音提交到已配置的语音服务转写，并将转写内容提交到文字分析模型划分角色和识别客户身份。':'将录音提交到已配置的语音服务转写，并将转写内容提交到文字分析模型划分销售和客户角色。';
   }
   if(e.target.id==='audio-link-customer')$$('.identity-candidate').forEach(b=>b.classList.toggle('selected',b.dataset.id===e.target.value));
   if(e.target.name==='audio-link-mode'){$('#audio-link-existing').hidden=e.target.value==='new';$('#audio-link-new').hidden=e.target.value!=='new';$('[data-team="link-audio-customer"]').textContent=e.target.value==='new'?'确认新建并关联':'确认关联客户';}
@@ -227,7 +258,7 @@ document.addEventListener('change',e=>{
   if(e.target.id==='owner-filter'){S.ownerFilter=e.target.value;S.customerSelection.clear();customersView();}
   if(e.target.classList.contains('customer-checkbox')){e.target.checked?S.customerSelection.add(e.target.dataset.id):S.customerSelection.delete(e.target.dataset.id);customersView();}
   if(e.target.id==='all-customers'){S.visibleCustomerIds.forEach(id=>e.target.checked?S.customerSelection.add(id):S.customerSelection.delete(id));customersView();}
-  if(e.target.id==='audio-file')$('#audio-file-name').textContent=e.target.files[0]?`${e.target.files[0].name} · ${(e.target.files[0].size/1024/1024).toFixed(2)} MB`:'尚未选择文件';
+  if(e.target.id==='audio-file'){const files=[...(e.target.files||[])];$('#audio-file-name').textContent=files.length?(files.length===1?`${files[0].name} · ${(files[0].size/1024/1024).toFixed(2)} MB`:`已选择 ${files.length} 个文件 · ${(files.reduce((sum,f)=>sum+f.size,0)/1024/1024).toFixed(2)} MB`):'尚未选择文件';}
 });
 document.addEventListener('input',e=>{
   if(['audio-customer-search','audio-link-search'].includes(e.target.id)){

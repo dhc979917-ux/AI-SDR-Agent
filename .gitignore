@@ -17,3 +17,6 @@ __pycache__/
 *.db
 *.pem
 *.key
+demo-var/
+cloudflare/.env
+cloudflare/*.json

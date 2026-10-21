@@ -24,6 +24,7 @@ from .audio_roles import classify_roles, RoleError
 from .audio_processing import AudioError, normalized_audio, segment_ranges, wav_bytes, RATE, PIPELINE_VERSION
 from .models import MAX_TRANSCRIPT_CHARS
 from .model_transport import provider_error
+from .role_draft import auto_label_draft, draft_has_customer, draft_pending_count, label_unlabeled
 
 
 MIMES = {'.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
@@ -160,8 +161,8 @@ def transcribe_openai(data,mime,settings):
 
 
 class AudioService:
-    def __init__(self, store, settings):
-        self.store, self.settings = store, settings
+    def __init__(self, store, settings, engine=None):
+        self.store, self.settings, self.engine = store, settings, engine
         self.directory = store.path.parent / 'audio'
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='asr')
@@ -206,9 +207,10 @@ class AudioService:
             return [self.decode(r) for r in db.execute(f'''SELECT t.*,c.name AS customer_name FROM transcriptions t
                 LEFT JOIN customers c ON c.id=t.customer_id {where} ORDER BY t.created_at DESC LIMIT 500''', args)]
 
-    def create(self, data, filename, cid, data_mode, key, actor, customer_mode='existing'):
-        if customer_mode not in ('existing', 'ai') or (customer_mode == 'existing') != bool(cid):
-            raise AudioError('请选择已有客户，或选择AI识别且不预设客户')
+    def create(self, data, filename, cid, data_mode, key, actor, customer_mode='existing', auto_analyze=False):
+        if customer_mode not in ('existing', 'ai', 'auto') or (customer_mode == 'existing') != bool(cid):
+            raise AudioError('请选择已有客户、AI识别或自动建档，且不要同时传入客户')
+        auto_analyze = bool(auto_analyze or customer_mode == 'auto')
         mime, duration = inspect_audio(data, filename, self.settings)
         stream = io.BytesIO(data) if isinstance(data,(bytes,bytearray)) else data
         stream.seek(0)
@@ -245,6 +247,8 @@ class AudioService:
                     (tid,cid,actor,identity,Path(filename).name,mime,size,sha,duration,data_mode,'queued',stamp,stamp,
                      customer_mode,'waiting_transcript' if customer_mode == 'ai' else 'not_requested'))
                 db.execute("UPDATE transcriptions SET model_actor=?,identity_model_actor=?,role_model_actor=?,role_status='waiting_transcript' WHERE id=?",(actor,actor,actor,tid))
+                if auto_analyze:
+                    db.execute("UPDATE transcriptions SET auto_analyze=1, auto_analysis_status='waiting_transcript' WHERE id=?", (tid,))
                 event(db, actor, 'audio_uploaded', '上传并请求云端转写', after={'id': tid, 'sha256': sha}, customer_id=cid)
                 return self.get(tid, actor, db), True
         except BaseException:
@@ -288,6 +292,80 @@ class AudioService:
             self.run_roles(tid,settings)
         if row['customer_mode'] == 'ai':
             self.run_identity(tid,settings)
+        with self.store.connection() as db:
+            current = db.execute('SELECT * FROM transcriptions WHERE id=?', (tid,)).fetchone()
+        if current and current['customer_id'] and current['role_status'] == 'ready' and current['status'] in ('transcribed', 'confirmed'):
+            self.auto_finish(tid, current['model_actor'] or current['uploaded_by'], settings)
+        elif int(row['auto_analyze'] or 0) or row['customer_mode'] == 'auto':
+            self.auto_finish(tid, row['model_actor'] or row['uploaded_by'], settings)
+
+    def auto_finish(self, tid, actor, settings):
+        try:
+            with self.store.connection() as db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT * FROM transcriptions WHERE id=?', (tid,)).fetchone()
+                if not row:
+                    raise NotFound('录音不存在')
+                if row['status'] not in ('transcribed', 'confirmed'):
+                    raise AudioError('转写尚未完成，不能自动分析')
+                if row['auto_analysis_id'] and row['auto_analysis_status'] in ('submitted', 'queued', 'running'):
+                    return
+                role_result = json.loads(row['role_result'] or '{}')
+                fallback = bool(row['auto_role_fallback'])
+                pending_count = 0
+                if row['status'] == 'confirmed' and row['confirmed_text']:
+                    draft = row['confirmed_text']
+                    pending_count = draft_pending_count(draft)
+                elif row['role_status'] == 'ready' and role_result.get('transcript'):
+                    original = role_result['transcript']
+                    draft = auto_label_draft(original)
+                    fallback = not draft_has_customer(original)
+                    pending_count = draft_pending_count(draft)
+                else:
+                    draft = label_unlabeled(row['raw_text'])
+                    fallback = True
+                if not draft.strip():
+                    raise AudioError('没有可分析的有效文字')
+                cid = row['customer_id']
+                if not cid:
+                    name = Path(row['filename']).stem.strip()[:100] or ('批量录音 ' + row['created_at'][:10])
+                    customer = new_customer(db, name, actor, actor)
+                    cid = customer['id']
+                provider = json.loads(row['provider'] or '{}')
+                provider['auto_role_fallback'] = fallback
+                provider['auto_pending_count'] = pending_count
+                db.execute("""UPDATE transcriptions SET customer_id=?, status='confirmed', confirmed_text=?, auto_analyze=1,
+                    confirmed_by='auto-pipeline', provider=?, auto_role_fallback=?, auto_analysis_status='queued',
+                    auto_analysis_error=NULL, revision=revision+1, updated_at=? WHERE id=?""",
+                    (cid, draft, dumps(provider), 1 if fallback else 0, now(), tid))
+                event(db, actor, 'transcript_auto_confirmed', '批量自动化：自动确认角色并提交分析',
+                      {'id': tid, 'revision': row['revision']},
+                      {'text': draft, 'customer_id': cid, 'role_fallback': fallback}, cid)
+            if sum(item['status'] in ('queued', 'running') for item in self.store.listing(500)) >= getattr(settings, 'max_pending', 20):
+                raise AudioError('分析任务较多，请稍后重试自动分析')
+            request = {
+                'transcript': draft,
+                'title': Path(row['filename']).stem.strip()[:100] or '批量录音',
+                'mode': 'llm' if settings.api_key else 'rules',
+                'data_mode': row['data_mode'],
+                'call_time': None,
+                'idempotency_key': f'auto-{tid}-r{row["revision"]}',
+                'customer_id': cid,
+                'transcription_id': tid,
+            }
+            fingerprint = hashlib.sha256(dumps({k: v for k, v in request.items() if k != 'idempotency_key'}).encode()).hexdigest()
+            if not self.engine:
+                raise AudioError('分析引擎未初始化，请手动进入分析')
+            record, _ = self.store.create(request, fingerprint, actor)
+            self.engine.submit(record['id'])
+            with self.store.connection() as db:
+                db.execute("UPDATE transcriptions SET auto_analysis_status='submitted', auto_analysis_id=?, updated_at=? WHERE id=?",
+                           (record['id'], now(), tid))
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, (AudioError, Conflict, NotFound, Forbidden)) else '自动分析失败，转写已保留，可手动进入分析'
+            with self.store.connection() as db:
+                db.execute("UPDATE transcriptions SET auto_analysis_status='failed', auto_analysis_error=?, updated_at=? WHERE id=?",
+                           (message[:500], now(), tid))
 
     def transcribe_segments(self, row, settings=None):
         settings=settings or self.settings.resolved(row['model_actor'] or row['uploaded_by'])
@@ -499,6 +577,8 @@ class AudioService:
             if not old['customer_id'] and text != (old['confirmed_text'] or old['raw_text']):
                 db.execute("UPDATE transcriptions SET identity_status='outdated',identity_result='{}',identity_error=NULL WHERE id=?", (tid,))
             db.execute("UPDATE transcriptions SET status='confirmed',confirmed_text=?,confirmed_by=?,revision=revision+1,updated_at=? WHERE id=?", (text,actor,now(),tid))
+            if old['auto_analyze']:
+                db.execute("UPDATE transcriptions SET auto_analysis_status='manual_ready',auto_analysis_id=NULL,auto_analysis_error=NULL WHERE id=?", (tid,))
             event(db, actor, 'transcript_confirmed', '听录音核对文本和说话人角色',
                   {'id':tid, 'text': old['confirmed_text'], 'revision': old['revision']}, {'text': text}, old['customer_id'])
             return self.get(tid, actor, db)
@@ -512,6 +592,7 @@ class AudioService:
             if self.pending(db) >= 10:
                 raise Conflict('转写任务较多，请稍后重试')
             db.execute("UPDATE transcriptions SET status='queued',model_actor=?,identity_model_actor=?,role_status='waiting_transcript',role_result='{}',role_error=NULL,error=NULL,revision=revision+1,updated_at=? WHERE id=?", (actor,actor,now(),tid))
+            db.execute("UPDATE transcriptions SET auto_analysis_status='waiting_transcript',auto_analysis_error=NULL,auto_analysis_id=NULL WHERE id=? AND auto_analyze=1",(tid,))
             event(db, actor, 'audio_retry', '重新请求云端转写', after={'id':tid}, customer_id=row['customer_id'])
         self.pool.submit(self.run, tid)
         return {'id':tid, 'status':'queued'}
@@ -532,3 +613,4 @@ class AudioService:
             db.execute("UPDATE transcriptions SET status='interrupted',error='服务重启导致转写中断，录音已保留，请重试',revision=revision+1 WHERE status IN ('queued','running')")
             db.execute("UPDATE transcriptions SET identity_status='interrupted',identity_error='客户识别被服务重启中断，可重新识别或手动选择客户',revision=revision+1 WHERE identity_status IN ('queued','running')")
             db.execute("UPDATE transcriptions SET role_status='interrupted',role_error='服务重启导致角色识别中断，原始转写与校对稿已保留，可重新分角色',role_generation=role_generation+1,revision=revision+1 WHERE role_status IN ('queued','running')")
+            db.execute("UPDATE transcriptions SET auto_analysis_status='interrupted',auto_analysis_error='服务重启导致自动分析中断，转写已保留，可重新分析',revision=revision+1 WHERE auto_analysis_status IN ('queued','running')")

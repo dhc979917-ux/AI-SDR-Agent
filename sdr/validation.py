@@ -32,7 +32,7 @@ def validate_extraction(extraction, turns):
             if not turn or ev["quote"] not in turn.text:
                 issues.append({"code": "QUOTE_MISMATCH", "field": path, "message": "引用无法在指定原文轮次定位"})
                 valid = False
-            elif turn.speaker in ('other','excluded'):
+            elif turn.speaker in ('other','excluded','pending'):
                 issues.append({"code":"EXCLUDED_SPEAKER","field":path,"message":"其他/系统播报及明确保留存疑的语句不能作为业务事实或意向证据"})
                 valid = False
             elif turn.speaker == "customer":

@@ -10,7 +10,7 @@ from sdr.store import Store
 
 @pytest.fixture
 def settings(tmp_path):
-    return Settings(db_path=tmp_path / "test.sqlite", api_key="", entity_url="", asr_key="")
+    return Settings(db_path=tmp_path / "test.sqlite", api_key="", entity_url="", asr_key="", entity_provider="off")
 
 
 @pytest.fixture

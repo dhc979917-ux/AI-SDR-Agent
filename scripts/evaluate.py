@@ -22,7 +22,7 @@ def main():
     args=parser.parse_args()
     path=ROOT/args.dataset
     cases=json.loads(path.read_text())
-    settings=Settings(db_path=Path(tempfile.mkdtemp(prefix='sdr-eval-'))/'eval.sqlite')
+    settings=Settings(db_path=Path(tempfile.mkdtemp(prefix='sdr-eval-'))/'eval.sqlite', entity_provider='off')
     if args.mode=='llm' and not settings.api_key:parser.error('LLM key is required.')
     store=Store(settings.db_path);engine=Engine(store,settings)
     rows=[]

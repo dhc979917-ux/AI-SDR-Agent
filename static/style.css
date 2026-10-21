@@ -61,3 +61,17 @@
 .role-confirmation{border-top:1px solid #e5ebf5;padding-top:18px;margin-top:18px}.role-confirm-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.role-confirm-header h3{font-size:14px;margin:0}.role-confirmation>.small-note{margin:10px 0 14px}.role-confirm-item{padding:16px;border:1px solid #f0d9a8;border-radius:9px;background:#fffbf2;margin:12px 0}.role-confirm-item p{font-size:14px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 14px}.role-confirm-options{display:flex;gap:10px;flex-wrap:wrap}.role-confirm-complete{font-size:12px;color:#35785e}.role-confirm-item .btn{min-height:38px}.turn.other{background:#f4f5f8;color:#748096}#audio-next-step{margin-top:14px}@media(max-width:580px){.role-confirm-options .btn{flex:1 1 110px}.role-confirm-item{padding:12px}}
 
 .role-confirm-list{max-height:430px;overflow-y:auto;padding-right:6px}.role-confirm-context{margin:8px 0 14px;font-size:12px;color:#66788d}.role-confirm-context summary{cursor:pointer}.role-confirm-context p{font-size:12px;line-height:1.8}.turn.excluded{background:#fffaf0}
+.entity-pick-list{display:grid;gap:9px;margin-bottom:16px}
+.entity-pick{display:flex;gap:10px;align-items:flex-start;border:1px solid #e5ebe8;border-radius:8px;padding:12px 13px;background:#fcfdfd;cursor:pointer}
+.entity-pick:hover{background:#f5f9ff;border-color:#c9d9f5}
+.entity-pick input{width:14px;min-height:0;margin-top:3px;flex:0 0 auto}
+.entity-pick span{display:block;min-width:0}
+.entity-pick strong{display:block;font-size:11px;line-height:1.7;font-weight:550}
+.entity-pick small{display:block;font-size:9px;line-height:1.8;color:#93a19b;margin-top:5px;overflow-wrap:anywhere}
+.batch-txt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border:1px dashed #dfe8f3;border-radius:8px;background:#fafcff}
+.batch-txt-row .file-button{white-space:nowrap}
+.batch-txt-row .btn{margin-left:auto;padding:7px 11px;font-size:10px}
+.audio-submit-row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.audio-submit-row .audio-submit{flex:1;min-width:160px}
+.turn.pending{background:#fdf8ec;border-color:#f0dfba}
+.turn.pending .turn-meta strong{color:#a17a2c}

@@ -47,7 +47,7 @@ function updateAudioReviewControls(){
   const badge=$('#audio-role-state');if(badge&&!['queued','running'].includes(a.role_status))badge.innerHTML=pill(state.pending.length?`${state.pending.length} 处待确认`:saved?'已保存确认':state.valid?'角色已标注 · 待保存':'请检查角色格式',state.pending.length?'amber':saved?'green':'blue');
   const save=$('[data-team="confirm-audio"]');if(save)save.disabled=busy||!state.valid;
   const next=$('[data-team="analyze-audio"]');if(next)next.disabled=busy||!a.customer_id||!saved||!state.valid;
-  let message=busy?'正在处理录音，请等待完成。':state.pending.length?`还有 ${state.pending.length} 处待确认，请在上方逐条选择角色。`:state.invalid.length?`第 ${state.invalid.slice(0,5).join('、')} 行缺少有效角色或内容，请在校对框修正。`:!state.hasCustomer?'至少需要一段真实客户发言，不能把全部语句标为销售或其他。':!saved?'角色标记已完成，请核对全文并点击「保存校对并确认角色」。':!a.customer_id?'校对稿已保存，请先在上方确认归属客户。':'校对稿和客户归属已确认，可以进入通话分析。';
+  let message=busy?'正在处理录音，请等待完成。':state.pending.length?`还有 ${state.pending.length} 处待确认，请在上方逐条选择角色。`:state.invalid.length?`第 ${state.invalid.slice(0,5).join('、')} 行缺少有效角色或内容，请在校对框修正。`:!state.hasCustomer?'至少需要一段真实客户发言，不能把全部语句标为销售或其他。':!saved?'角色标记已完成，请核对全文并点击「保存校对并确认角色」。':!a.customer_id?'校对稿已保存，请先在上方确认归属客户。':a.auto_analysis_id&&a.auto_analysis_status==='submitted'?'已自动提交分析，可查看结果；修正后保存校对稿可重新分析。':'校对稿和客户归属已确认，可以直接分析这段录音。';
   const status=$('#audio-next-step');if(status){status.textContent=message;status.className='notice '+(saved&&a.customer_id?'success':'info');}
 }
 function audioRolesPanel(a){

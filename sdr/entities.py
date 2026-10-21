@@ -45,12 +45,22 @@ def similarity(a, b):
     a, b = core(a), core(b)
     if not a or not b:
         return 0.0
+    if sorted(a) == sorted(b):
+        return .98
     char = ratio(a, b) / 100
     sound = ratio(lazy_pinyin(a), lazy_pinyin(b)) / 100
     return round(max(char, sound * .96), 4)
 
 
 def source_valid(entity, data_mode):
+    if entity.get("source_type") == "qcc_mcp":
+        if not entity.get("credit_code") or not entity.get("verified_registry"):
+            return False
+        try:
+            today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+            return date.fromisoformat(entity["observed_at"][:10]) <= today <= date.fromisoformat(entity["valid_until"][:10])
+        except (ValueError, KeyError, TypeError):
+            return False
     if not entity.get("verified_registry") or not entity.get("id") or not entity.get("source_url"):
         return False
     if data_mode == "real" and entity.get("data_mode") != "real":
@@ -135,8 +145,10 @@ def captured_entity(fields, data_mode, name=None, manual=False):
                          'source_title': '人工填写' if manual else '通话提取'} if value else None,
             'mention': value or None, 'candidates': [], 'quality': .6 if value else 0.0,
             'search_status': 'not_requested', 'query': None,
+            'raw_name': value or None, 'provider': 'off', 'resolution_confidence': 0.0,
+            'query_variants': [], 'fetched_at': None, 'error': None,
             'missing': [] if value else ['企业名称待人工填写'], 'method': 'transcript_or_manual'}
 
 
 def has_company(entity):
-    return entity.get('status') in ('captured','manual','verified') and bool((entity.get('selected') or {}).get('name'))
+    return entity.get('status') in ('captured','manual','verified','suggested','confirmed') and bool((entity.get('selected') or {}).get('name'))

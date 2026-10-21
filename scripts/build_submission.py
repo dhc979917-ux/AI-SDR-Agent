@@ -6,16 +6,17 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ["README.md", "pyproject.toml", "requirements.txt", "requirements.lock",
-         "run.sh", ".env.example", ".gitignore", ".gitattributes", "Dockerfile", ".dockerignore"]
-DIRECTORIES = ["sdr", "static", "prompts", "data", "tests", "eval", "scripts", "docs"]
-EXCLUDED = {"__pycache__", ".pytest_cache", ".DS_Store"}
+         "run.sh", ".env.example", ".gitignore", ".gitattributes", "Dockerfile", ".dockerignore", "render.yaml", "render.paid.yaml", "docker-compose.cloudflare.yml"]
+DIRECTORIES = ["sdr", "static", "prompts", "data", "tests", "eval", "scripts", "docs", "cloudflare"]
+EXCLUDED = {"__pycache__", ".pytest_cache", ".DS_Store", ".env"}
 
 
 def main():
     paths = [ROOT / f for f in FILES]
     for directory in DIRECTORIES:
         paths.extend(p for p in (ROOT / directory).rglob("*") if p.is_file()
-                     and not any(x in EXCLUDED for x in p.parts) and p.suffix not in (".pyc", ".pyo"))
+                     and not any(x in EXCLUDED for x in p.parts) and p.suffix not in (".pyc", ".pyo")
+                     and not (p.parent.name == "cloudflare" and p.suffix == ".json"))
     paths = sorted(set(paths))
     if not all(p.exists() and not p.is_symlink() for p in paths):
         raise RuntimeError("Submission contains a missing file or symlink.")

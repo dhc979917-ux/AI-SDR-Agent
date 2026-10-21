@@ -80,6 +80,11 @@ def migrate(db):
         'role_error': 'TEXT',
         'role_model_actor': 'TEXT',
         'role_generation': 'INTEGER NOT NULL DEFAULT 0',
+        'auto_analyze': 'INTEGER NOT NULL DEFAULT 0',
+        'auto_analysis_status': 'TEXT',
+        'auto_analysis_error': 'TEXT',
+        'auto_analysis_id': 'TEXT',
+        'auto_role_fallback': 'INTEGER NOT NULL DEFAULT 0',
     }.items():
         if name not in audio_columns:
             db.execute(f'ALTER TABLE transcriptions ADD COLUMN {name} {definition}')

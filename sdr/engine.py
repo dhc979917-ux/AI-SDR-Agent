@@ -5,7 +5,10 @@ import time
 import re
 
 from .entities import captured_entity, has_company
+from .entity_resolver import resolve_company
 from .extractors import rule_extract, llm_extract, ProviderError
+from .role_draft import auto_label_draft, draft_has_customer, draft_pending_count, has_labels, label_unlabeled
+from .audio_roles import classify_roles
 from .models import Extraction, Lead
 from .preprocess import split_turns
 from .scoring import assess, DIMENSIONS, LABELS, SCORE_VERSION
@@ -14,6 +17,7 @@ from .validation import validate_extraction
 REASONS = {
     "INTENT_ABNORMAL": "得分0–5分（含5分），须人工核听录音并给出意向定性",
     "ENTITY_UNRESOLVED": "企业名称缺失，待人工填写", "ENTITY_AMBIGUOUS": "多个经营主体，客户归属不明",
+    "ENTITY_UNCONFIRMED": "企业全称已召回，待人工确认客户关系",
     "ENTITY_LOOKUP_FAILED": "企业检索失败", "CONTACT_MASKED": "联系方式脱敏，无法直接联系",
     "CONTACT_MISSING": "缺少可用联系方式", "CONTACT_NAME_MISSING": "联系人尚未确认",
     "INTENT_INSUFFICIENT": "意向证据不足或存在冲突", "INTENT_BOUNDARY": "意向处于阈值复核带",
@@ -21,6 +25,7 @@ REASONS = {
     "SECOND_REVIEW": "等待另一名审核人复核", "QUALIFICATION_UNKNOWN": "行业或企业场景尚未确认",
     "DO_NOT_CONTACT": "客户要求停止联系", "LOW_INTENT": "当前为低意向，不作为正式 SQL",
     "NOT_SALES": "服务或无效通话，不进入新增销售线索", "MANUAL_REVIEW": "冷启动人工审核",
+    "ROLE_PENDING": "有角色待确认语句，已暂不参与事实抽取",
 }
 
 
@@ -51,6 +56,8 @@ def recalculate(result, request, settings):
         if not has_company(entity):
             code = {"ambiguous": "ENTITY_AMBIGUOUS", "lookup_failed": "ENTITY_LOOKUP_FAILED"}.get(entity["status"], "ENTITY_UNRESOLVED")
             blockers.append(code)
+        elif entity.get("status") == "suggested":
+            blockers.append("ENTITY_UNCONFIRMED")
         if phone_status != "valid":
             blockers.append("CONTACT_MASKED" if phone_status == "masked" else "CONTACT_MISSING")
         if not value("contact_name"):
@@ -70,6 +77,9 @@ def recalculate(result, request, settings):
         reasons.append("INTENT_BOUNDARY")
     if review.get("stage") == "secondary" and not approved:
         reasons.append("SECOND_REVIEW")
+    pending_turns = sum(1 for turn in result.get("turns", []) if turn.get("speaker") == "pending")
+    if pending_turns:
+        reasons.append("ROLE_PENDING")
     if not approved and not settings.auto_publish and not reasons and intent["level"] in ("high", "medium"):
         reasons.append("MANUAL_REVIEW")
     if abnormal:
@@ -86,6 +96,7 @@ def recalculate(result, request, settings):
     if review["status"] in ("deferred", "rejected"):
         ready = False
     result.update(review=review, blockers=blockers, review_reasons=list(dict.fromkeys(reasons)),
+                  role_pending_count=pending_turns,
                   delivery_status="ready" if ready else "blocked", phone_status=phone_status,
                   production_eligible=request["data_mode"] == "real" and ready,
                   reason_labels=REASONS)
@@ -100,8 +111,8 @@ def recalculate(result, request, settings):
         next_action = "停止营销联系；保留拒联标记，不进入培育或自动外联。"
     elif intent["level"] == "low":
         next_action = "暂不作为正式 SQL；仅在客户同意的范围和时点安排后续沟通。"
-    elif not has_company(entity) or phone_status != "valid":
-        next_action = "优先补充企业名称及可用联系方式；按已同意渠道沟通，确认试用安排、设计师人数和采购角色。"
+    elif entity.get("status") in ("ambiguous", "suggested", "lookup_failed", "unresolved") or not has_company(entity) or phone_status != "valid":
+        next_action = "优先确认企业抬头及可用联系方式；按已同意渠道沟通，确认试用安排、设计师人数和采购角色。"
     elif intent["level"] == "high":
         next_action = "建议一个工作日内按已同意渠道跟进，确认演示或试用日期及参与者；完成审核后交付。"
     else:
@@ -118,7 +129,7 @@ def recalculate(result, request, settings):
         reason = f"{label}意向，规则分数{interval}分。" + "；".join(description) + "。采购角色与实际安排仍需确认。"
         if result.get("human_level"):
             reason += "等级经人工覆盖，原始规则结果见审计记录。"
-    lead = Lead(company_name=entity["selected"]["name"] if has_company(entity) else None,
+    lead = Lead(company_name=entity["selected"]["name"] if has_company(entity) else entity.get("mention"),
                 industry=value("industry"), area=value("area"), contact_name=value("contact_name"), contact_title=value("contact_title"),
                 phone=phone, intent_level=intent["level"], intent_reason=reason, demand_summary=value("demand_summary"),
                 mendian=value("mendian"), shejishi=value("shejishi"), call_time=request.get("call_time"), next_action=next_action,
@@ -141,16 +152,40 @@ class Engine:
         request = record["request"]
         started = time.monotonic()
         turns = split_turns(request["transcript"])
-        business_turns = [t for t in turns if t.speaker not in ('other','excluded')]
-        result = {"turns": [t.model_dump() for t in turns], "versions": {"schema": "2.1", "rules": SCORE_VERSION, "validation": "evidence-2.2", "entity": "entity-3.0"},
-                  "review": {"status": "pending", "stage": "primary", "primary_actor": None}, "data_mode": request["data_mode"]}
+        result = {"turns": [t.model_dump() for t in turns], "versions": {"schema": "2.1", "rules": SCORE_VERSION, "validation": "evidence-2.2", "entity": "entity-4.0", "roles": "auto-text-v1"},
+                  "review": {"status": "pending", "stage": "primary", "primary_actor": None}, "data_mode": request["data_mode"], "auto_roles": None}
         settings=self.settings
         try:
             settings=self.settings.resolved(record["owner"])
             if getattr(self.settings,"model_settings",None):
                 from .workspace import require_analysis
                 with self.store.connection() as db:require_analysis(db,aid,record["owner"])
-            self.store.checkpoint(aid, "原文分段与角色定位", {"turns": len(turns)})
+            text = request["transcript"]
+            if not has_labels(text):
+                if settings.api_key:
+                    try:
+                        role_result = classify_roles(text, settings)
+                        original = role_result.get("transcript") or text
+                        text = auto_label_draft(original)
+                        auto_roles = {"method": "text_role_model", "model": role_result.get("model"),
+                                      "uncertain_count": role_result.get("uncertain_count"),
+                                      "pending_count": draft_pending_count(text),
+                                      "fallback": not draft_has_customer(original), "error": None}
+                    except Exception as exc:
+                        text = label_unlabeled(text)
+                        auto_roles = {"method": "single_customer_fallback", "model": None,
+                                      "uncertain_count": None, "pending_count": 0,
+                                      "fallback": True, "error": str(exc)[:300]}
+                else:
+                    text = label_unlabeled(text)
+                    auto_roles = {"method": "single_customer_fallback", "model": None,
+                                  "uncertain_count": None, "pending_count": 0,
+                                  "fallback": True, "error": "未配置文字分析模型"}
+                turns = split_turns(text)
+                result["turns"] = [t.model_dump() for t in turns]
+                result["auto_roles"] = auto_roles
+            business_turns = [t for t in turns if t.speaker not in ('other','excluded','pending')]
+            self.store.checkpoint(aid, "原文分段与角色定位", {"turns": len(turns), "auto_roles": result["auto_roles"] is not None})
             self.store.checkpoint(aid, "模型理解与事实抽取" if request["mode"] == "llm" else "离线规则抽取")
             extraction, provider = llm_extract(business_turns, settings) if request["mode"] == "llm" else rule_extract(business_turns)
             if request['mode']=='llm':
@@ -158,13 +193,13 @@ class Engine:
             self.store.checkpoint(aid, "证据与字段口径校验")
             validated, issues = validate_extraction(extraction, turns)
             result.update(extraction=validated, raw_extraction=extraction.model_dump(), validation_issues=issues, provider=provider)
-            self.store.checkpoint(aid, "提取通话企业名称")
+            self.store.checkpoint(aid, "企业召回与主体关系核验")
             if validated["call_type"] in ("invalid", "service") or validated["do_not_contact"]:
                 empty = deepcopy(validated["fields"])
                 empty["raw_company"]["value"] = empty["brand_name"]["value"] = None
                 result["entity"] = captured_entity(empty, request["data_mode"])
             else:
-                result["entity"] = captured_entity(validated["fields"], request["data_mode"])
+                result["entity"] = resolve_company(validated["fields"], turns, settings, request["data_mode"])
             self.store.checkpoint(aid, "意向评分与审核路由")
             recalculate(result, request, settings)
             result["elapsed_ms"] = round((time.monotonic() - started) * 1000)

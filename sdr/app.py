@@ -37,7 +37,7 @@ def create_app(settings=None):
     settings.model_settings=model_settings
     engine = Engine(store, settings)
     reviews = ReviewService(store, settings, guarded=True)
-    auth, workspace, audio = Auth(store, settings), Workspace(store), AudioService(store, settings)
+    auth, workspace, audio = Auth(store, settings), Workspace(store), AudioService(store, settings, engine)
     samples = json.loads((ROOT / "data/samples.json").read_text())
 
     @asynccontextmanager
@@ -48,7 +48,7 @@ def create_app(settings=None):
         engine.pool.shutdown(wait=False, cancel_futures=True)
         audio.pool.shutdown(wait=False, cancel_futures=True)
 
-    app = FastAPI(title="酷家乐 · AI SDR 工作台", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="酷家乐 · AI SDR 工作台", version="0.4.0", lifespan=lifespan)
     app.state.store, app.state.engine, app.state.settings = store, engine, settings
     app.state.auth, app.state.audio = auth, audio
     app.state.model_settings=model_settings
@@ -197,15 +197,20 @@ def create_app(settings=None):
     @app.post('/api/transcriptions', status_code=202)
     async def upload_audio(request: Request, filename: str = Query(min_length=1,max_length=180),
                            idempotency_key: str = Query(min_length=8,max_length=100),
-                           customer_id: str | None = None, customer_mode: Literal['existing','ai'] = 'existing',
+                           customer_id: str | None = None, customer_mode: Literal['existing','ai','auto'] = 'existing',
+                           auto_analyze: bool = False,
                            data_mode: Literal['real','synthetic','snapshot_demo'] = 'real', user=Depends(actor)):
         selected=settings.resolved(user)
         if not selected.asr_key:
             raise HTTPException(422, '请先在「我的模型」中配置录音转写模型及API Key')
         if (customer_mode == 'existing') != bool(customer_id):
-            raise HTTPException(422, '请选择已有客户，或选择AI识别且不预设客户')
+            raise HTTPException(422, '请选择已有客户，或选择AI识别/自动建档且不预设客户')
         if customer_mode == 'ai' and not selected.api_key:
             raise HTTPException(422, '尚未配置客户识别模型，请先选择已有客户')
+        if auto_analyze and customer_mode == 'ai':
+            raise HTTPException(422, '批量自动分析请选择已有客户或自动建档')
+        if customer_mode == 'auto':
+            auto_analyze = True
         if customer_id:
             with store.connection() as db:
                 require_customer(db, customer_id, user)
@@ -218,7 +223,7 @@ def create_app(settings=None):
                 if size > settings.audio_max_bytes:
                     raise HTTPException(413, f'音频不能超过{settings.audio_max_bytes/1024/1024:g} MB')
                 await run_in_threadpool(source.write, chunk)
-            row, created = await run_in_threadpool(audio.create, source, filename, customer_id, data_mode, idempotency_key, user, customer_mode)
+            row, created = await run_in_threadpool(audio.create, source, filename, customer_id, data_mode, idempotency_key, user, customer_mode, auto_analyze)
         if created:
             audio.pool.submit(audio.run, row['id'])
         return {**row, 'created':created}
@@ -236,13 +241,26 @@ def create_app(settings=None):
 
     @app.post('/api/transcriptions/{tid}/confirm')
     def confirm_audio(tid: str, body: TranscriptConfirm, user=Depends(actor)):
-        return audio.confirm(tid, body, user)
+        row = audio.confirm(tid, body, user)
+        if row.get('customer_id') and row.get('role_status') == 'ready' and row.get('status') == 'confirmed':
+            audio.auto_finish(tid, user, settings.resolved(user))
+            row = audio.get(tid, user)
+        return row
 
     @app.post('/api/transcriptions/{tid}/retry')
     def retry_audio(tid: str, user=Depends(actor)):
         if not settings.resolved(user).asr_key:
             raise HTTPException(422, '尚未配置语音识别密钥')
         return audio.retry(tid, user)
+
+    @app.post('/api/transcriptions/{tid}/auto-analyze')
+    def auto_analyze_audio(tid: str, user=Depends(actor)):
+        row = audio.get(tid, user)
+        eligible = row.get('customer_id') and row.get('role_status') == 'ready' and row.get('status') in ('transcribed', 'confirmed')
+        if not row.get('auto_analyze') and not eligible:
+            raise HTTPException(422, '该录音尚未满足自动分析条件，请先确认客户和角色校对稿')
+        audio.auto_finish(tid, user, settings.resolved(user))
+        return audio.get(tid, user)
 
     @app.post('/api/transcriptions/{tid}/identify')
     def identify_audio_customer(tid: str, body: AudioIdentityRequest, user=Depends(actor)):
@@ -254,7 +272,11 @@ def create_app(settings=None):
 
     @app.post('/api/transcriptions/{tid}/customer')
     def confirm_audio_customer(tid: str, body: AudioCustomerConfirm, user=Depends(actor)):
-        return audio.confirm_customer(tid, body, user)
+        row = audio.confirm_customer(tid, body, user)
+        if row.get('customer_id') and row.get('role_status') == 'ready' and row.get('status') in ('transcribed', 'confirmed'):
+            audio.auto_finish(tid, user, settings.resolved(user))
+            row = audio.get(tid, user)
+        return row
 
     @app.delete('/api/transcriptions/{tid}')
     def delete_audio(tid: str, user=Depends(actor)):
@@ -373,7 +395,7 @@ def create_app(settings=None):
             raise HTTPException(422, "导出类型必须为 candidate 或 qualified")
         if kind == "qualified" and (row["request"]["data_mode"] != "real" or result.get("delivery_status") != "ready" or not result.get("production_eligible")):
             raise HTTPException(409, "该记录尚不满足真实 SQL 交付门槛；演示数据只能导出候选。")
-        if kind == "qualified" and result.get("entity", {}).get("status") == "verified" and not source_valid(result.get("entity", {}).get("selected") or {}, "real"):
+        if kind == "qualified" and result.get("entity", {}).get("status") in ("verified", "confirmed") and not source_valid(result.get("entity", {}).get("selected") or {}, "real"):
             raise HTTPException(409, "企业核验来源已失效，请重新核验后导出正式 SQL。")
         lead = result.get("lead")
         if lead:
@@ -386,7 +408,7 @@ def create_app(settings=None):
                    "evidence": result.get("extraction", {}).get("fields", {}), "company_resolution": result.get("entity"),
                    "signals": result.get("extraction", {}).get("signals", {}), "validation_issues": result.get("validation_issues", []),
                    "do_not_contact": result.get("extraction", {}).get("do_not_contact", False),
-                   "scorecard": result.get("intent"), "confidence_method": "heuristic_min_v1", "review_reasons": result.get("review_reasons"),
+                   "scorecard": result.get("intent"), "auto_roles": result.get("auto_roles"), "role_pending_count": result.get("role_pending_count"), "confidence_method": "heuristic_min_v1", "review_reasons": result.get("review_reasons"),
                    "versions": result.get("versions"), "provider": result.get("provider"), "error": row["error"]}}
         content = json.dumps(payload, ensure_ascii=False, indent=2)
         return Response(content, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{aid}.json"'})

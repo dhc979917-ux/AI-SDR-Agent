@@ -1,7 +1,7 @@
 import re
 from .models import Turn
 
-LABEL = re.compile(r"^\s*(销售|客户|SDR|顾客|销售人员|客服|用户|其他|存疑)\s*[:：]\s*(.*)$", re.I)
+LABEL = re.compile(r"^\s*(销售|客户|SDR|顾客|销售人员|客服|用户|其他|存疑|待确认)\s*[:：]\s*(.*)$", re.I)
 
 
 def split_turns(text: str) -> list[Turn]:
@@ -12,7 +12,7 @@ def split_turns(text: str) -> list[Turn]:
             continue
         match = LABEL.match(line)
         if match:
-            speaker = {"其他":"other", "存疑":"excluded"}.get(match[1]) or ("customer" if match[1] in ("客户", "顾客", "用户") else "sales")
+            speaker = {"其他":"other", "存疑":"excluded", "待确认":"pending"}.get(match[1]) or ("customer" if match[1] in ("客户", "顾客", "用户") else "sales")
             rows.append((speaker, match[2].strip()))
         elif rows:
             speaker, old = rows[-1]
