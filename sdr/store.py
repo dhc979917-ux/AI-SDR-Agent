@@ -165,18 +165,36 @@ class Store:
             row = db.execute("SELECT trace FROM analyses WHERE id=?", (aid,)).fetchone()
             trace = json.loads(row[0])
             trace.append({"phase": phase, "at": now(), "detail": detail or ""})
-            db.execute("UPDATE analyses SET status='running',phase=?,trace=?,updated_at=? WHERE id=?",
+            db.execute("UPDATE analyses SET status='running',phase=?,trace=?,updated_at=? WHERE id=? AND status!='cancelled'",
                        (phase, dumps(trace), now(), aid))
 
     def finish(self, aid, result, error=None):
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
+            current = db.execute("SELECT status FROM analyses WHERE id=?", (aid,)).fetchone()
+            if not current or current["status"] == "cancelled":
+                return
             stamp = now()
-            db.execute("UPDATE analyses SET status=?,phase=?,result=?,original=?,revision=1,error=?,updated_at=? WHERE id=?",
+            db.execute("UPDATE analyses SET status=?,phase=?,result=?,original=?,revision=1,error=?,updated_at=? WHERE id=? AND status!='cancelled'",
                        ("failed" if error else "completed", "分析失败 · 可人工处理" if error else "分析完成",
                         dumps(result), dumps(result), error, stamp, aid))
             db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)", (uuid.uuid4().hex, aid, "Agent", "analyze", error or "生成分析快照",
                        None, dumps(result), 1, None, stamp))
+
+    def cancel(self, aid, actor="system"):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM analyses WHERE id=?", (aid,)).fetchone()
+            if not row:
+                raise NotFound("记录不存在")
+            if row["status"] not in ("queued", "running"):
+                raise Conflict("只有排队中或运行中的分析可以停止")
+            stamp = now()
+            db.execute("UPDATE analyses SET status='cancelled',phase='分析已停止',error='用户停止分析，原文和检查点已保留。',updated_at=? WHERE id=? AND status IN ('queued','running')",
+                       (stamp, aid))
+            db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       (uuid.uuid4().hex, aid, actor, "cancel", "用户停止分析", None, None, row["revision"], None, stamp))
+            return self.decode(db.execute("SELECT * FROM analyses WHERE id=?", (aid,)).fetchone())
 
     def recover(self):
         with self.connection() as db:

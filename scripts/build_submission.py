@@ -6,7 +6,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ["README.md", "pyproject.toml", "requirements.txt", "requirements.lock",
-         "run.sh", ".env.example", ".gitignore", ".gitattributes", "Dockerfile", ".dockerignore", "render.yaml", "render.paid.yaml", "docker-compose.cloudflare.yml"]
+         "run.sh", ".env.example", ".gitignore", ".gitattributes", "Dockerfile", ".dockerignore", "render.yaml", "render.paid.yaml", "docker-compose.cloudflare.yml", "docker-compose.vps.yml", "Caddyfile"]
 DIRECTORIES = ["sdr", "static", "prompts", "data", "tests", "eval", "scripts", "docs", "cloudflare"]
 EXCLUDED = {"__pycache__", ".pytest_cache", ".DS_Store", ".env"}
 

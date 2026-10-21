@@ -322,6 +322,12 @@ def create_app(settings=None):
     def delete_analysis(aid: str, expected_revision: int = Query(ge=0), user=Depends(actor)):
         return store.delete(aid, expected_revision, user)
 
+    @app.post('/api/analyses/{aid}/cancel')
+    def cancel_analysis(aid: str, user=Depends(actor)):
+        check_analysis(aid, user)
+        row = store.cancel(aid, user)
+        return {"id": row["id"], "status": row["status"], "phase": row["phase"]}
+
     @app.post("/api/analyses", status_code=202)
     def analyze(body: AnalyzeRequest, user=Depends(actor)):
         if body.mode == "llm" and not settings.resolved(user).api_key:

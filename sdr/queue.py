@@ -9,7 +9,8 @@ STATES = {
     'processing': (5, '分析中', 'cyan'),
     'approved': (6, '已通过', 'green'),
     'rejected': (7, '已排除', 'rose'),
-    'not_required': (8, '无需审核', 'gray'),
+    'cancelled': (8, '已停止', 'gray'),
+    'not_required': (9, '无需审核', 'gray'),
 }
 
 
@@ -17,7 +18,9 @@ def review_display(row):
     result = row.get('result') or {}
     review = result.get('review') or {}
     state = review.get('status', 'pending')
-    if row['status'] in ('queued', 'running'):
+    if row['status'] == 'cancelled':
+        state = 'cancelled'
+    elif row['status'] in ('queued', 'running'):
         state = 'processing'
     elif row['status'] == 'interrupted' or row['status'] == 'failed' and state not in ('approved','rejected','deferred'):
         state = 'exception'

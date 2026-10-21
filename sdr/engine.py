@@ -147,8 +147,16 @@ class Engine:
     def submit(self, aid):
         return self.pool.submit(self.run, aid)
 
+    def _cancelled(self, aid):
+        try:
+            return self.store.get(aid)["status"] == "cancelled"
+        except Exception:
+            return False
+
     def run(self, aid):
         record = self.store.get(aid)
+        if record["status"] == "cancelled":
+            return record
         request = record["request"]
         started = time.monotonic()
         turns = split_turns(request["transcript"])
@@ -160,11 +168,15 @@ class Engine:
             if getattr(self.settings,"model_settings",None):
                 from .workspace import require_analysis
                 with self.store.connection() as db:require_analysis(db,aid,record["owner"])
+            if self._cancelled(aid):
+                return self.store.get(aid)
             text = request["transcript"]
             if not has_labels(text):
                 if settings.api_key:
                     try:
                         role_result = classify_roles(text, settings)
+                        if self._cancelled(aid):
+                            return self.store.get(aid)
                         original = role_result.get("transcript") or text
                         text = auto_label_draft(original)
                         auto_roles = {"method": "text_role_model", "model": role_result.get("model"),
@@ -187,24 +199,36 @@ class Engine:
             business_turns = [t for t in turns if t.speaker not in ('other','excluded','pending')]
             self.store.checkpoint(aid, "原文分段与角色定位", {"turns": len(turns), "auto_roles": result["auto_roles"] is not None})
             self.store.checkpoint(aid, "模型理解与事实抽取" if request["mode"] == "llm" else "离线规则抽取")
+            if self._cancelled(aid):
+                return self.store.get(aid)
             extraction, provider = llm_extract(business_turns, settings) if request["mode"] == "llm" else rule_extract(business_turns)
+            if self._cancelled(aid):
+                return self.store.get(aid)
             if request['mode']=='llm':
                 provider.update(configured_by=record['owner'],provider_id=settings.text_provider)
             self.store.checkpoint(aid, "证据与字段口径校验")
             validated, issues = validate_extraction(extraction, turns)
             result.update(extraction=validated, raw_extraction=extraction.model_dump(), validation_issues=issues, provider=provider)
             self.store.checkpoint(aid, "企业召回与主体关系核验")
+            if self._cancelled(aid):
+                return self.store.get(aid)
             if validated["call_type"] in ("invalid", "service") or validated["do_not_contact"]:
                 empty = deepcopy(validated["fields"])
                 empty["raw_company"]["value"] = empty["brand_name"]["value"] = None
                 result["entity"] = captured_entity(empty, request["data_mode"])
             else:
                 result["entity"] = resolve_company(validated["fields"], turns, settings, request["data_mode"])
+            if self._cancelled(aid):
+                return self.store.get(aid)
             self.store.checkpoint(aid, "意向评分与审核路由")
             recalculate(result, request, settings)
             result["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            if self._cancelled(aid):
+                return self.store.get(aid)
             self.store.finish(aid, result)
         except Exception as exc:
+            if self._cancelled(aid):
+                return self.store.get(aid)
             # A failed provider never silently falls back to a pretend AI result.
             from .model_settings import ModelConfigError
             from .workspace import Forbidden

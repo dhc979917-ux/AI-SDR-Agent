@@ -120,41 +120,65 @@ fly open
 
 只保留一个 Machine；不要水平扩容。
 
-## 4. 自有 VPS + Docker + Caddy
+## 4. 香港 VPS + Docker + Caddy（无需域名、无需国外卡）
+
+适合长期演示：支付宝买一台香港轻量服务器，2 核 2G 就够；不需要 ICP，也不需要买域名。
+
+服务器 IP 假设是 `1.2.3.4`，用免费的 `sslip.io` 得到公网域名：
+
+```text
+1-2-3-4.sslip.io
+```
+
+### 4.1 准备
 
 ```bash
-docker build -t ai-sdr-demo .
-mkdir -p /srv/ai-sdr/var
-docker run -d --name ai-sdr-demo --restart unless-stopped \
-  -p 127.0.0.1:8765:8765 \
-  -v /srv/ai-sdr/var:/app/var \
-  --env-file /srv/ai-sdr/.env \
-  ai-sdr-demo
+apt update && apt install -y docker.io docker-compose-plugin git
+git clone https://github.com/dhc979917-ux/AI-SDR-Agent.git
+cd AI-SDR-Agent
+cp .env.example .env
 ```
 
-Caddy 反向代理：
-
-```caddyfile
-demo.example.com {
-  reverse_proxy 127.0.0.1:8765
-}
-```
-
-`.env` 至少包含：
+编辑 `.env`：
 
 ```dotenv
+DEMO_HOST=1-2-3-4.sslip.io
+
 SDR_COOKIE_SECURE=true
 SDR_PROXY_HEADERS=true
 SDR_DEMO_ADMIN_USER=admin
 SDR_DEMO_ADMIN_PASSWORD=<至少12位密码>
 SDR_SEED_DEMO=true
 SDR_ENTITY_PROVIDER=auto
-QCC_MCP_URL=https://agent.qcc.com/mcp/company/stream
-QCC_MCP_TOKEN=<token>
-SDR_LLM_API_KEY=<key>
-SDR_ASR_API_KEY=<key>
+QCC_CACHE_DAYS=0
+QCC_MCP_TOKEN=<可选>
+SDR_LLM_API_KEY=<可选>
+SDR_ASR_API_KEY=<可选>
 SDR_AUTO_PUBLISH=false
 ```
+
+### 4.2 启动
+
+```bash
+docker compose -f docker-compose.vps.yml up -d --build
+docker compose -f docker-compose.vps.yml logs -f app
+```
+
+Caddy 会自动为 `DEMO_HOST` 申请 HTTPS 证书，通常一两分钟内可用：
+
+```text
+https://1-2-3-4.sslip.io
+```
+
+登录 `admin` + 你设置的密码。
+
+### 4.3 注意
+
+- 服务器安全组/防火墙放行 `80` 和 `443`；应用 8765 不直接暴露。
+- 数据在 `demo-var/`，备份时保留 `sdr.sqlite3`、`audio/` 和 `model-settings.key`。
+- 如果 `sslip.io` 在你所在网络不可用，买一个国内域名，把 `DEMO_HOST` 改成 `demo.example.com`，A 记录指向服务器 IP 即可；Caddy 会自动申请证书。
+- 仍然只能单实例；SQLite 和本地录音不能多副本共享。
+- 不要把真实 `var/`、真实录音或真实模型 key 放进公开 Demo。
 
 ## 5. 演示数据与账号
 
