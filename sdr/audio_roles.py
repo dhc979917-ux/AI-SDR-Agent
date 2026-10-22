@@ -145,6 +145,33 @@ def validate_unit_roles(source,content,units,offset=0,hints=None):
     return merged
 
 
+def salvage_unit_roles(content, units):
+    """Keep independently valid units; never repair or regenerate source text."""
+    try:
+        raw = json.loads(content)
+    except (ValueError, TypeError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    fields = {name: raw.get(name) if isinstance(raw.get(name), dict) else {}
+              for name in ('roles', 'notes', 'splits')}
+    result = {'roles': {}, 'notes': {}, 'splits': {}}
+    for unit in units:
+        key = str(unit['id'])
+        candidate = {'roles': {key: fields['roles'].get(key)},
+                     'notes': {key: fields['notes'][key]} if key in fields['notes'] else {},
+                     'splits': {key: fields['splits'][key]} if key in fields['splits'] else {}}
+        try:
+            validate_unit_roles(unit['text'], json.dumps(candidate, ensure_ascii=False), [unit])
+        except (ValueError, KeyError, IndexError, TypeError):
+            result['roles'][key] = 'unknown'
+            result['notes'][key] = '本片段格式或原文完整性校验失败，原文已保留，请人工确认'
+        else:
+            for name in result:
+                result[name].update(candidate[name])
+    return json.dumps(result, ensure_ascii=False)
+
+
 def reconcile_units(first,review,units):
     """Disagreement is a review item, never silently accepted as customer fact."""
     a=UnitResponse.model_validate_json(first);b=UnitResponse.model_validate_json(review)
@@ -184,6 +211,7 @@ def classify_roles(text,settings,speaker_hints=None,on_progress=None):
                             headers={'Authorization':'Bearer '+settings.api_key},
                             json=json_chat_body(settings.model,messages,8500))
                         if response.status_code!=200:raise RoleError(provider_error(response,'角色识别模型'))
+                        content = None
                         try:
                             value=response.json()
                             tokens+=int((value.get('usage') or {}).get('total_tokens') or 0)
@@ -192,7 +220,11 @@ def classify_roles(text,settings,speaker_hints=None,on_progress=None):
                             outputs.append(content)
                             break
                         except (ValueError,KeyError,IndexError,TypeError):
-                            if attempt:raise RoleError(f'第{index+1}/{len(parts)}段角色结果未通过原文完整性检查，原文已保留，请重试') from None
+                            if attempt:
+                                content = salvage_unit_roles(content, units)
+                                validate_unit_roles(target, content, units, start, local_hints)
+                                outputs.append(content)
+                                break
                             messages.append({'role':'user','content':'上次结果未通过原文覆盖或格式校验。请返回roles对象，键为target_units中每一个id的字符串，从1到最后一个编号全部出现一次，不得遗漏或添加编号。splits内逐字保留原文。只返回规定JSON。'})
                     if stage==0:
                         messages=[*messages[:2],{'role':'assistant','content':content},

@@ -1,0 +1,85 @@
+[
+  {
+    "id": "EXAMPLE-VERIFIED",
+    "split": "example_synthetic",
+    "transcript": "销售：您好，请介绍一下您这边的情况。\n客户：我们公司全称是青禾空间设计（杭州）有限公司，在杭州做全屋定制。我叫陈宇，我是设计总监，设计师有12人。\n销售：主要有什么需求？\n客户：出图慢，跟工厂对接经常出错，希望改善设计和生产对接。下周想试用，预算一年五万可以接受。\n销售：周三下午两点，我给您和采购经理一起做演示，可以吗？\n客户：确认，就定周三下午两点，我和采购经理一起参加演示。手机号13800000000，你加我微信。",
+    "notes": "合成示例，仅演示标注格式；请替换为获得授权的真实/半真实通话。",
+    "gold": {
+      "company_accept": [
+        "青禾空间设计（杭州）有限公司",
+        "杭州青禾空间设计有限公司"
+      ],
+      "intent_level": "high",
+      "do_not_contact": false,
+      "fields": {
+        "industry": "全屋定制",
+        "area": "浙江省杭州市",
+        "contact_name": "陈宇",
+        "contact_title": "设计总监",
+        "phone": "13800000000",
+        "mendian": null,
+        "shejishi": 12
+      }
+    }
+  },
+  {
+    "id": "EXAMPLE-CASUAL",
+    "split": "example_synthetic",
+    "transcript": "销售：您是想了解设计软件吗？\n客户：我只是随便问问，先了解一下，没有预算，也没有计划，不用发资料了。",
+    "notes": "合成示例，仅演示标注格式；请替换为获得授权的真实/半真实通话。",
+    "gold": {
+      "company_accept": [],
+      "intent_level": "low",
+      "do_not_contact": false,
+      "fields": {
+        "industry": null,
+        "area": null,
+        "contact_name": null,
+        "contact_title": null,
+        "phone": null,
+        "mendian": null,
+        "shejishi": null
+      }
+    }
+  },
+  {
+    "id": "EXAMPLE-DNC",
+    "split": "example_synthetic",
+    "transcript": "销售：您好，想再跟您介绍一下企业版。\n客户：我们不需要，请不要再联系我，也不要发营销信息。",
+    "notes": "合成示例，仅演示标注格式；请替换为获得授权的真实/半真实通话。",
+    "gold": {
+      "company_accept": [],
+      "intent_level": "low",
+      "do_not_contact": true,
+      "fields": {
+        "industry": null,
+        "area": null,
+        "contact_name": null,
+        "contact_title": null,
+        "phone": null,
+        "mendian": null,
+        "shejishi": null
+      }
+    }
+  },
+  {
+    "id": "EXAMPLE-COMPETITOR",
+    "split": "example_synthetic",
+    "transcript": "销售：现在用的是什么软件？\n客户：刚续费竞品，但是出图慢，生产对接经常出错，我们想换软件。我们在苏州做家具制造。\n销售：时间预算怎么考虑？\n客户：下个月准备试用，预算一年三万，可以接受。\n销售：方便加微信吗？\n客户：你加我微信吧，139xxxx2222。",
+    "notes": "合成示例，仅演示标注格式；请替换为获得授权的真实/半真实通话。",
+    "gold": {
+      "company_accept": [],
+      "intent_level": "high",
+      "do_not_contact": false,
+      "fields": {
+        "industry": "家具制造",
+        "area": "江苏省苏州市",
+        "contact_name": null,
+        "contact_title": null,
+        "phone": "139xxxx2222",
+        "mendian": null,
+        "shejishi": null
+      }
+    }
+  }
+]

@@ -13,6 +13,7 @@ from .models import Extraction, Lead
 from .preprocess import split_turns
 from .scoring import assess, DIMENSIONS, LABELS, SCORE_VERSION
 from .validation import validate_extraction
+from .quality_agent import run_quality_agent
 
 REASONS = {
     "INTENT_ABNORMAL": "得分0–5分（含5分），须人工核听录音并给出意向定性",
@@ -209,6 +210,22 @@ class Engine:
             self.store.checkpoint(aid, "证据与字段口径校验")
             validated, issues = validate_extraction(extraction, turns)
             result.update(extraction=validated, raw_extraction=extraction.model_dump(), validation_issues=issues, provider=provider)
+            if (request['mode'] == 'llm' and settings.quality_agent_enabled and issues
+                    and validated['call_type'] not in ('invalid', 'service')
+                    and not validated['do_not_contact']
+                    and not (result.get('auto_roles') or {}).get('fallback')):
+                def quality_guard():
+                    if self._cancelled(aid):
+                        raise RuntimeError('analysis cancelled')
+                    if getattr(self.settings, 'model_settings', None):
+                        from .workspace import require_analysis
+                        with self.store.connection() as db:
+                            require_analysis(db, aid, record['owner'])
+                self.store.checkpoint(aid, "证据问题自主复查")
+                validated, issues, audit = run_quality_agent(extraction, turns, settings, quality_guard)
+                result.update(extraction=validated, validation_issues=issues, quality_agent=audit)
+                self.store.checkpoint(aid, "自主复查完成", {'status': audit['status'], 'calls': audit['calls'],
+                                                       'manual_tasks': len(audit['manual_tasks'])})
             self.store.checkpoint(aid, "企业召回与主体关系核验")
             if self._cancelled(aid):
                 return self.store.get(aid)

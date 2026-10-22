@@ -42,6 +42,7 @@ class Settings:
     asr_segment_seconds: int = 180
     audio_decode_timeout: float = 180.0
     auto_publish: bool = field(default_factory=lambda: os.getenv("SDR_AUTO_PUBLISH", "false").lower() == "true")
+    quality_agent_enabled: bool = field(default_factory=lambda: os.getenv("SDR_QUALITY_AGENT", "true").lower() == "true")
     max_pending: int = 20
 
     def resolved(self,actor=None):

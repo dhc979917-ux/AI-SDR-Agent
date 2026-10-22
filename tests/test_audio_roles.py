@@ -82,8 +82,10 @@ def test_invalid_model_output_gets_one_repair_then_safe_failure(settings,monkeyp
         calls.append(json.loads(request.content))
         return httpx.Response(200,json={'choices':[{'message':{'content':response([role('虚构的电话123')])}}]})
     install_transport(monkeypatch,handler)
-    with pytest.raises(RoleError,match='完整性'):classify_roles('原话。',settings)
-    assert len(calls)==2 and len(calls[1]['messages'])==3
+    result=classify_roles('原话。',settings)
+    assert result['transcript']=='待确认：原话。'
+    assert result['uncertain_count']==1
+    assert len(calls)==4 and len(calls[1]['messages'])==3
 
 
 def test_valid_repair_and_safe_provider_failure(settings,monkeypatch):
@@ -272,3 +274,48 @@ def test_missing_text_key_skips_roles_and_diarize_can_be_selected(team,monkeypat
     row=alice.get('/api/transcriptions/'+tid).json()
     assert row['status']=='transcribed' and row['role_status']=='skipped'
     assert alice.post('/api/transcriptions/'+tid+'/roles',json={'expected_revision':row['revision']}).status_code==422
+
+
+@pytest.mark.parametrize('bad', [
+    {'roles': {'1': 'sales', '3': 'customer'}},
+    {'roles': {'1': 'sales', '2': 'invalid', '3': 'customer'}},
+    {'roles': {'1': 'sales', '2': 'customer', '3': 'customer'},
+     'splits': {'2': [role('改写。'), role('虚构。', 'customer')]}},
+])
+def test_partial_failure_keeps_valid_neighbors(settings, monkeypatch, bad):
+    settings.api_key='test-key'
+    install_transport(monkeypatch, lambda request: httpx.Response(200, json={
+        'choices': [{'message': {'content': json.dumps(bad)}}]}))
+    text='我是销售。预算两万。下周试用。'
+    result=classify_roles(text, settings)
+    assert [t['role'] for t in result['turns']]==['sales', 'unknown', 'customer']
+    assert ''.join(t['text'] for t in result['turns'])==text
+    assert result['uncertain_count']==1
+
+
+def test_failed_review_only_marks_affected_unit_unknown(settings, monkeypatch):
+    settings.api_key='test-key'; calls=[]
+    def handler(request):
+        calls.append(1)
+        roles={'1':'sales', '2':'customer'} if len(calls)==1 else {'1':'sales'}
+        return httpx.Response(200, json={'choices':[{'message':{'content':json.dumps({'roles':roles})}}]})
+    install_transport(monkeypatch, handler)
+    result=classify_roles('我是销售。预算两万。', settings)
+    assert [t['role'] for t in result['turns']]==['sales','unknown']
+    assert len(calls)==3
+
+
+def test_unparseable_chunk_does_not_discard_other_chunks(settings, monkeypatch):
+    settings.api_key='test-key'
+    text='我是销售。预算两万。下周试用。'
+    monkeypatch.setattr('sdr.audio_roles.chunks', lambda t: [(0,5),(5,10),(10,len(t))])
+    def handler(request):
+        payload=json.loads(json.loads(request.content)['messages'][1]['content'])
+        original=''.join(u['text'] for u in payload['target_units'])
+        content='invalid json' if original=='预算两万。' else json.dumps({'roles':{'1':'sales' if original=='我是销售。' else 'customer'}})
+        return httpx.Response(200,json={'choices':[{'message':{'content':content}}]})
+    install_transport(monkeypatch,handler)
+    result=classify_roles(text,settings)
+    assert [t['role'] for t in result['turns']]==['sales','unknown','customer']
+    assert ''.join(t['text'] for t in result['turns'])==text
+    assert result['completed_chunks']==3

@@ -128,9 +128,15 @@ function aiEvidenceTurns(r){
   add(r.extraction?.classification_evidence);add(r.extraction?.policy_evidence);
   return [...ids].sort((a,b)=>Number(String(a).replace(/\D/g,''))-Number(String(b).replace(/\D/g,''))).slice(0,20);
 }
+function qualityAgentView(a) {
+  if(!a)return '';
+  const states={resolved:'证据问题已修正',no_issues:'无需补查',human_review:'待人工确认',call_budget:'达到补查次数上限',time_budget:'达到补查时间上限',context_budget:'原文较长，交人工复核',model_unavailable:'复查模型不可用',repeated_action:'重复操作已停止',invalid_action:'无效操作已阻止'};
+  const actions={inspect_evidence:'查看证据',revise_field:'局部修正',handoff:'转人工',finish:'停止复查'};
+  return `<section class="card"><div class="card-head"><div><h2>证据自主复查</h2><p>${esc(states[a.status]||a.status)} · ${esc(a.calls)} 次模型调用</p></div></div><div class="card-body">${(a.steps||[]).map(step=>`<p><strong>${esc(actions[step.action]||step.action)}${step.field?' · '+esc(fieldLabels[step.field]||step.field):''}</strong>：${esc(step.outcome)} ${evidenceLinks((step.turn_ids||[]).map(turn_id=>({turn_id})))}</p>`).join('')}${(a.manual_tasks||[]).map(task=>`<p class="small-note">待核听 · ${esc(fieldLabels[task.field]||task.field)}：${esc(task.message)} ${evidenceLinks((task.turn_ids||[]).map(turn_id=>({turn_id})))}</p>`).join('')}<p class="small-note">自动复查记录保留最初的处理状态；后续人工订正以审核结果为准。</p></div></section>`;
+}
 function resultView(record) {
   const r=record.result, f=r.extraction.fields, v=name=>f[name]?.value;
-  return `<div class="insight-row"><div class="insight"><div class="label">当前意向</div><div class="value">${levelLabels[r.intent.level]||'待判断'}</div><div class="note">${r.intent.status==='policy'?'明确拒绝规则':r.intent.status==='human_override'?'人工覆盖等级':'基于原文信号'}</div></div><div class="insight"><div class="label">${r.intent.total===undefined?"历史评分区间":"意向得分"}</div><div class="value">${r.intent.total ?? (r.intent.interval[0]===r.intent.interval[1]?r.intent.interval[0]:r.intent.interval.join('–'))}<small> / 100</small></div><div class="note">证据覆盖 ${Math.round(r.intent.coverage*100)}%</div></div><div class="insight"><div class="label">规则可靠性</div><div class="value">${r.quality.overall.toFixed(2)}</div><div class="note">用于审核，不是正确概率</div></div></div>
+  return `${qualityAgentView(r.quality_agent)}<div class="insight-row"><div class="insight"><div class="label">当前意向</div><div class="value">${levelLabels[r.intent.level]||'待判断'}</div><div class="note">${r.intent.status==='policy'?'明确拒绝规则':r.intent.status==='human_override'?'人工覆盖等级':'基于原文信号'}</div></div><div class="insight"><div class="label">${r.intent.total===undefined?"历史评分区间":"意向得分"}</div><div class="value">${r.intent.total ?? (r.intent.interval[0]===r.intent.interval[1]?r.intent.interval[0]:r.intent.interval.join('–'))}<small> / 100</small></div><div class="note">证据覆盖 ${Math.round(r.intent.coverage*100)}%</div></div><div class="insight"><div class="label">规则可靠性</div><div class="value">${r.quality.overall.toFixed(2)}</div><div class="note">用于审核，不是正确概率</div></div></div>
   ${r.extraction.do_not_contact?'<div class="notice error">客户明确要求停止联系。此记录不进入营销培育或正式 SQL 交付。</div>':''}
   ${record.error?`<div class="notice error">${esc(record.error)}<br><button class="text-button" data-action="retry">重新分析这段通话 →</button></div>`:''}
   ${r.role_pending_count?`<div class="notice">有 ${r.role_pending_count} 处角色待确认标记，已暂不参与事实抽取，可在录音详情中修正。</div>`:''}

@@ -20,3 +20,14 @@ __pycache__/
 demo-var/
 cloudflare/.env
 cloudflare/*.json
+
+# Real labeled calls must stay local.
+eval/labeled_cases.json
+
+# Real evaluation audio must stay local.
+data/real_calls/
+
+# Local evaluation drafts and transcripts.
+eval/labeled_cases.draft.json
+eval/audio_transcripts.json
+data/录音测试集/
